@@ -26,7 +26,10 @@ def run(args):
     model = model.to(model.device)
     if not args.test:
         logging.info('Starting train')
-        model.run_train(dataset['train'], dataset['dev'], args)
+        if args.reinforce:
+            model.run_train_reinforce(dataset['train'], dataset['dev'], args)
+        else:
+            model.run_train(dataset['train'], dataset['dev'], args)
     if args.resume:
         model.load_best_save(directory=args.resume)
     else:
@@ -49,6 +52,8 @@ def get_args():
     parser.add_argument('--stop', help='slot to early stop on', default='joint_goal')
     parser.add_argument('--resume', help='save directory to resume from')
     parser.add_argument('-n', '--nick', help='nickname for model', default='default')
+    parser.add_argument('--reinforce', action='store_true', help='train with RL')
+    parser.add_argument('--gamma', help='RL discount', default=0.99, type=float)
     parser.add_argument('--seed', default=42, help='random seed', type=int)
     parser.add_argument('--test', action='store_true', help='run in evaluation only mode')
     parser.add_argument('--gpu', type=int, help='which GPU to use')

@@ -2,13 +2,17 @@ import torch
 from torch import nn
 from torch import optim
 from torch.nn import functional as F
+from torch.autograd import Variable
 import numpy as np
 import logging
+import random
 import os
 import re
 import json
-from collections import defaultdict
+from collections import defaultdict, namedtuple
 from pprint import pformat
+from rl import ReplayMemory, get_rewards
+
 
 
 def pad(seqs, emb, device, pad=0):
@@ -205,7 +209,68 @@ class Model(nn.Module):
         logger.addHandler(file_handler)
         return logger
 
-    def run_train(self, train, dev, args):
+    def run_train_reinforce(self, train_data, dev_data, args):
+        memory = ReplayMemory(10000)
+
+        iteration = 0
+        logger = self.get_train_logger()
+
+        for epoch in range(args.epoch):
+            logger.info('starting epoch {}'.format(epoch))
+
+            self.train()
+            # TODO make sure to get whole dialogs here (in dataset.py)
+            for batch_dialogs in train_data.batch(batch_size=args.batch_size,
+                                                  shuffle=True,
+                                                  whole_dialogs=True):
+                iteration += 1
+                predictions = []
+                batch_rewards = []
+                for d in batch_dialogs:
+                    batch = d.turns
+                    self.zero_grad()
+                    loss, scores = self.forward(batch)
+                    predictions += self.extract_predictions(scores)
+                    dialog_reward = get_rewards(d, predictions)['joint_goal']
+                    batch_rewards.append(dialog_reward)
+                self.update(batch_rewards, scores, args.gamma)
+                # TODO compute feedback for overall goal, use as reward
+
+    def update(self, batch_rewards, log_probs, gamma):
+        R = 0
+        rewards = []
+        policy_loss = []
+        for r in batch_rewards[::-1]:
+            R = r + gamma * R
+            rewards.insert(0, R)
+        rewards = torch.tensor(rewards)
+
+        rewards = (rewards - rewards.mean()) / (rewards.std() + eps)
+        for log_prob, reward in zip(log_probs, rewards):
+            policy_loss.append(-log_prob * reward)
+        self.optimizer.zero_grad()
+        policy_loss = torch.cat(policy_loss).sum()
+        policy_loss.backward()
+        self.optimizer.step()
+
+
+    def update_parameters(self, rewards, log_probs, entropies, gamma):
+        R = torch.zeros(1, 1)
+        loss = 0
+        for i in reversed(range(len(rewards))):
+            R = gamma * R + rewards[i]
+            loss = loss - (log_probs[i] * (
+                Variable(R).expand_as(log_probs[i])).cuda()).sum() - (
+                               0.0001 * entropies[i].cuda()).sum()
+        loss = loss / len(rewards)
+
+        self.optimizer.zero_grad()
+        loss.backward()
+
+        torch.nn.utils.clip_grad_norm(self.model.parameters(), 40)
+        self.optimizer.step()
+
+    def run_train(self, train_data, dev_data, args):
         track = defaultdict(list)
         iteration = 0
         best = {}
@@ -218,7 +283,8 @@ class Model(nn.Module):
 
             # train and update parameters
             self.train()
-            for batch in train.batch(batch_size=args.batch_size, shuffle=True):
+            for batch in train_data.batch(batch_size=args.batch_size,
+                                          shuffle=True):
                 iteration += 1
                 self.zero_grad()
                 loss, scores = self.forward(batch)
@@ -230,8 +296,8 @@ class Model(nn.Module):
             summary = {'iteration': iteration, 'epoch': epoch}
             for k, v in track.items():
                 summary[k] = sum(v) / len(v)
-            summary.update({'eval_train_{}'.format(k): v for k, v in self.run_eval(train, args).items()})
-            summary.update({'eval_dev_{}'.format(k): v for k, v in self.run_eval(dev, args).items()})
+            summary.update({'eval_train_{}'.format(k): v for k, v in self.run_eval(train_data, args).items()})
+            summary.update({'eval_dev_{}'.format(k): v for k, v in self.run_eval(dev_data, args).items()})
 
             # do early stopping saves
             stop_key = 'eval_dev_{}'.format(args.stop)
@@ -247,8 +313,8 @@ class Model(nn.Module):
                     )
                 )
                 self.prune_saves()
-                dev.record_preds(
-                    preds=self.run_pred(dev, self.args),
+                dev_data.record_preds(
+                    preds=self.run_pred(dev_data, self.args),
                     to_file=os.path.join(self.args.dout, 'dev.pred.json'),
                 )
             summary.update({'best_{}'.format(k): v for k, v in best.items()})
@@ -346,3 +412,4 @@ class Model(nn.Module):
             assert scores_and_files, 'no saves exist at {}'.format(directory)
             score, fname = scores_and_files[0]
             self.load(fname)
+

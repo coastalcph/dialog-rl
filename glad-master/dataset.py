@@ -91,6 +91,10 @@ class Dataset:
     def __len__(self):
         return len(self.dialogues)
 
+    def iter_dialogs(self):
+        for d in self.dialogues:
+            yield d
+
     def iter_turns(self):
         for d in self.dialogues:
             for t in d.turns:
@@ -122,12 +126,15 @@ class Dataset:
                 values[s].add(v.lower())
         return Ontology(sorted(list(slots)), {k: sorted(list(v)) for k, v in values.items()})
 
-    def batch(self, batch_size, shuffle=False):
-        turns = list(self.iter_turns())
+    def batch(self, batch_size, shuffle=False, whole_dialogs=False):
+        if whole_dialogs:
+            iter_items = list(self.iter_dialogs())
+        else:
+            iter_items = list(self.iter_turns())
         if shuffle:
-            np.random.shuffle(turns)
-        for i in tqdm(range(0, len(turns), batch_size)):
-            yield turns[i:i+batch_size]
+            np.random.shuffle(iter_items )
+        for i in tqdm(range(0, len(iter_items ), batch_size)):
+            yield iter_items [i:i+batch_size]
 
     def evaluate_preds(self, preds):
         request = []
