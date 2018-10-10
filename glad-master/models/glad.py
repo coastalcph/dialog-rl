@@ -211,9 +211,13 @@ class Model(nn.Module):
         return logger
 
     def run_train_reinforce(self, train_data, dev_data, args):
-
+        track = defaultdict(list)
         iteration = 0
+        best = {}
         logger = self.get_train_logger()
+
+        if self.optimizer is None:
+            self.set_optimizer()
 
         for epoch in range(args.epoch):
             logger.info('starting epoch {}'.format(epoch))
@@ -238,6 +242,38 @@ class Model(nn.Module):
                     batch_scores.append(0.1)  # faking this for now
                 self.update(batch_rewards, batch_scores, args.gamma)
                 # TODO compute feedback for overall goal, use as reward
+                # evalute on train and dev
+
+            summary = {'iteration':iteration, 'epoch':epoch}
+            for k, v in track.items():
+                summary[k] = sum(v) / len(v)
+            summary.update({'eval_train_{}'.format(k):v for k, v in
+                            self.run_eval(train_data, args).items()})
+            summary.update({'eval_dev_{}'.format(k):v for k, v in
+                            self.run_eval(dev_data, args).items()})
+
+            # do early stopping saves
+            stop_key = 'eval_dev_{}'.format(args.stop)
+            train_key = 'eval_train_{}'.format(args.stop)
+            if best.get(stop_key, 0) <= summary[stop_key]:
+                best_dev = '{:f}'.format(summary[stop_key])
+                best_train = '{:f}'.format(summary[train_key])
+                best.update(summary)
+                self.save(
+                    best,
+                    identifier='epoch={epoch},iter={iteration},train_{key}={train},dev_{key}={dev}'.format(
+                        epoch=epoch, iteration=iteration, train=best_train,
+                        dev=best_dev, key=args.stop,
+                    )
+                )
+                self.prune_saves()
+                dev_data.record_preds(
+                    preds=self.run_pred(dev_data, self.args),
+                    to_file=os.path.join(self.args.dout, 'dev.pred.json'),
+                )
+            summary.update({'best_{}'.format(k):v for k, v in best.items()})
+            logger.info(pformat(summary))
+            track.clear()
 
     def update(self, batch_rewards, log_probs, gamma):
         R = 0
