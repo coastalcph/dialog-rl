@@ -11,7 +11,7 @@ import re
 import json
 from collections import defaultdict, namedtuple
 from pprint import pformat
-from rl import ReplayMemory, get_rewards
+from rl import get_rewards
 
 
 
@@ -210,7 +210,6 @@ class Model(nn.Module):
         return logger
 
     def run_train_reinforce(self, train_data, dev_data, args):
-        memory = ReplayMemory(10000)
 
         iteration = 0
         logger = self.get_train_logger()
@@ -226,14 +225,17 @@ class Model(nn.Module):
                 iteration += 1
                 predictions = []
                 batch_rewards = []
+                batch_scores = []
                 for d in batch_dialogs:
                     batch = d.turns
                     self.zero_grad()
                     loss, scores = self.forward(batch)
                     predictions += self.extract_predictions(scores)
-                    dialog_reward = get_rewards(d, predictions)['joint_goal']
+                    dialog_reward = get_rewards([d], predictions)['joint_goal']
                     batch_rewards.append(dialog_reward)
-                self.update(batch_rewards, scores, args.gamma)
+                    # batch_scores.append(scores)
+                    batch_scores.append(0.1)  # faking this for now
+                self.update(batch_rewards, batch_scores, args.gamma)
                 # TODO compute feedback for overall goal, use as reward
 
     def update(self, batch_rewards, log_probs, gamma):
