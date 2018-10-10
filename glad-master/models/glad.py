@@ -14,6 +14,7 @@ from pprint import pformat
 from rl import get_rewards
 
 
+eps = np.finfo(np.float32).eps.item()
 
 def pad(seqs, emb, device, pad=0):
     lens = [len(s) for s in seqs]
