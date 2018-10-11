@@ -210,6 +210,14 @@ class Model(nn.Module):
         logger.addHandler(file_handler)
         return logger
 
+    # def select_actions(self, batch):
+    #     """
+    #     Samples an action for each of the slots
+    #     :param batch:
+    #     :return:
+    #     """
+    #     loss, scores = self.forward(batch)
+
     def run_train_reinforce(self, train_data, dev_data, args):
         track = defaultdict(list)
         iteration = 0
@@ -223,7 +231,6 @@ class Model(nn.Module):
             logger.info('starting epoch {}'.format(epoch))
 
             self.train()
-            # TODO make sure to get whole dialogs here (in dataset.py)
             for batch_dialogs in train_data.batch(batch_size=args.batch_size,
                                                   shuffle=True,
                                                   whole_dialogs=True):
@@ -232,19 +239,25 @@ class Model(nn.Module):
                 batch_rewards = []
                 batch_scores = []
                 for d in batch_dialogs:
-                    batch = d.turns
+                    batch = d.turns  # TODO pad these to batch_size?
                     self.zero_grad()
                     loss, scores = self.forward(batch)
                     predictions += self.extract_predictions(scores)
                     dialog_reward = get_rewards([d], predictions)['joint_goal']
-                    batch_rewards.append(dialog_reward)
+                    for s, slot in enumerate(scores.keys()):
+                        for t, turn in enumerate(d.turns):
+                            slot_turn_score = scores[slot][t]
+                            batch_scores.append(slot_turn_score)
+                            batch_rewards.append(dialog_reward)
+
+                    # batch_rewards.append(dialog_reward)
                     # batch_scores.append(scores)
-                    batch_scores.append(0.1)  # faking this for now
+                    # batch_scores.append(0.1)  # faking this for now
                 self.update(batch_rewards, batch_scores, args.gamma)
                 # TODO compute feedback for overall goal, use as reward
                 # evalute on train and dev
 
-            summary = {'iteration':iteration, 'epoch':epoch}
+            summary = {'iteration': iteration, 'epoch': epoch}
             for k, v in track.items():
                 summary[k] = sum(v) / len(v)
             summary.update({'eval_train_{}'.format(k):v for k, v in
@@ -282,32 +295,32 @@ class Model(nn.Module):
         for r in batch_rewards[::-1]:
             R = r + gamma * R
             rewards.insert(0, R)
-        rewards = torch.tensor(rewards)
+        rewards = torch.Tensor(rewards)
 
         rewards = (rewards - rewards.mean()) / (rewards.std() + eps)
         for log_prob, reward in zip(log_probs, rewards):
             policy_loss.append(-log_prob * reward)
+            # policy_loss.append(reward)
         self.optimizer.zero_grad()
-        policy_loss = torch.cat(policy_loss).sum()
+        policy_loss = torch.stack(policy_loss).sum()
         policy_loss.backward()
         self.optimizer.step()
 
-
-    def update_parameters(self, rewards, log_probs, entropies, gamma):
-        R = torch.zeros(1, 1)
-        loss = 0
-        for i in reversed(range(len(rewards))):
-            R = gamma * R + rewards[i]
-            loss = loss - (log_probs[i] * (
-                Variable(R).expand_as(log_probs[i])).cuda()).sum() - (
-                               0.0001 * entropies[i].cuda()).sum()
-        loss = loss / len(rewards)
-
-        self.optimizer.zero_grad()
-        loss.backward()
-
-        torch.nn.utils.clip_grad_norm(self.model.parameters(), 40)
-        self.optimizer.step()
+    # def update_parameters(self, rewards, log_probs, entropies, gamma):
+    #     R = torch.zeros(1, 1)
+    #     loss = 0
+    #     for i in reversed(range(len(rewards))):
+    #         R = gamma * R + rewards[i]
+    #         loss = loss - (log_probs[i] * (
+    #             Variable(R).expand_as(log_probs[i])).cuda()).sum() - (
+    #                            0.0001 * entropies[i].cuda()).sum()
+    #     loss = loss / len(rewards)
+    #
+    #     self.optimizer.zero_grad()
+    #     loss.backward()
+    #
+    #     torch.nn.utils.clip_grad_norm(self.model.parameters(), 40)
+    #     self.optimizer.step()
 
     def run_train(self, train_data, dev_data, args):
         track = defaultdict(list)
