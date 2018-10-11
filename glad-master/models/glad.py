@@ -2,6 +2,7 @@ import torch
 from torch import nn
 from torch import optim
 from torch.nn import functional as F
+from torch.distributions import Categorical
 from torch.autograd import Variable
 import numpy as np
 import logging
@@ -200,7 +201,8 @@ class Model(nn.Module):
                 loss += F.binary_cross_entropy(ys[s], labels[s])
         else:
             loss = torch.Tensor([0]).to(self.device)
-        return loss, {s: v.data.tolist() for s, v in ys.items()}
+        return loss, {s: v for s, v in ys.items()}
+        #return loss, {s: v.data.tolist() for s, v in ys.items()}
 
     def get_train_logger(self):
         logger = logging.getLogger('train-{}'.format(self.__class__.__name__))
@@ -246,8 +248,12 @@ class Model(nn.Module):
                     dialog_reward = get_rewards([d], predictions)['joint_goal']
                     for s, slot in enumerate(scores.keys()):
                         for t, turn in enumerate(d.turns):
-                            slot_turn_score = scores[slot][t]
-                            batch_scores.append(slot_turn_score)
+                            slot_turn_scores = F.softmax(scores[slot][t])
+                            #slot_turn_scores = F.softmax(torch.Tensor(scores[slot][t]))
+                            m = Categorical(slot_turn_scores)
+                            prediction = m.sample()
+                            prediction_log_prob = m.log_prob(prediction)
+                            batch_scores.append(prediction_log_prob)
                             batch_rewards.append(dialog_reward)
 
                     # batch_rewards.append(dialog_reward)
@@ -300,9 +306,15 @@ class Model(nn.Module):
         rewards = (rewards - rewards.mean()) / (rewards.std() + eps)
         for log_prob, reward in zip(log_probs, rewards):
             policy_loss.append(-log_prob * reward)
+            #policy_loss.append(-log_prob * (reward+0.001))
+            #local_policy_loss = -log_prob * (reward+0.001)
+            #local_policy_loss.backward()
+            #policy_loss.backward()
             # policy_loss.append(reward)
         self.optimizer.zero_grad()
         policy_loss = torch.stack(policy_loss).sum()
+        #policy_loss = torch.autograd.Variable(policy_loss)
+        #print(policy_loss)
         policy_loss.backward()
         self.optimizer.step()
 
