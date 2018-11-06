@@ -8,7 +8,15 @@ from dataset import Dataset, Ontology
 from preprocess_data import dann
 
 
-def load_dataset(splits=('train', 'dev', 'test')):
+def load_dataset(splits=('train', 'dev', 'test'), domains='all', strict=False):
+    """
+
+    :param splits:
+    :param domains: filter for domains (if 'all', use all available)
+    :param strict: if True, select only dialogs that contain only a single domain
+    :return:
+    """
+    # TODO implement filtering with `domains` and `strict`
     with open(os.path.join(dann, 'ontology.json')) as f:
         ontology = Ontology.from_dict(json.load(f))
     with open(os.path.join(dann, 'vocab.json')) as f:

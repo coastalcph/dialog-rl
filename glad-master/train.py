@@ -17,7 +17,10 @@ def run(args):
     torch.manual_seed(args.seed)
     seed(args.seed)
 
-    dataset, ontology, vocab, Eword = load_dataset()
+    dataset_pretrain, ontology, vocab, Eword = load_dataset(
+        domains=args.pretrain_domains, strict=args.pretrain_single_domain)
+    dataset_finetune, _, _, _ = load_dataset(domains=args.finetune_domains,
+                                             strict=args.finetune_single_domain)
 
     model = load_model(args.model, args, ontology, vocab)
     model.save_config()
@@ -26,17 +29,22 @@ def run(args):
     model = model.to(model.device)
     if not args.test:
         logging.info('Starting train')
-        if args.reinforce:
-            model.run_train_reinforce(dataset['train'], dataset['dev'], args)
+        # Pretrain
+        if args.pretrain_reinforce:
+            model.run_train_reinforce(dataset_pretrain['train'], dataset_pretrain['dev'], args)
         else:
-            model.run_train(dataset['train'], dataset['dev'], args)
+            model.run_train(dataset_pretrain['train'], dataset_pretrain['dev'], args)
+        # When done with pretraining, run finetuning
+        # TODO allow for providing pretrained and saved model
+        model.run_train_reinforce(dataset_finetune['train'],
+                                  dataset_finetune['dev'], args)
     if args.resume:
         model.load_best_save(directory=args.resume)
     else:
         model.load_best_save(directory=args.dout)
     model = model.to(model.device)
     logging.info('Running dev evaluation')
-    dev_out = model.run_eval(dataset['dev'], args)
+    dev_out = model.run_eval(dataset_pretrain['dev'], args)
     pprint(dev_out)
 
 
@@ -52,12 +60,16 @@ def get_args():
     parser.add_argument('--stop', help='slot to early stop on', default='joint_goal')
     parser.add_argument('--resume', help='save directory to resume from')
     parser.add_argument('-n', '--nick', help='nickname for model', default='default')
-    parser.add_argument('--reinforce', action='store_true', help='train with RL')
+    parser.add_argument('--pretrain_reinforce', action='store_true', help='train with RL')
     parser.add_argument('--gamma', help='RL discount', default=0.99, type=float)
     parser.add_argument('--seed', default=42, help='random seed', type=int)
     parser.add_argument('--test', action='store_true', help='run in evaluation only mode')
     parser.add_argument('--gpu', type=int, help='which GPU to use')
     parser.add_argument('--dropout', nargs='*', help='dropout rates', default=['emb=0.2', 'local=0.2', 'global=0.2'])
+    parser.add_argument('--pretrain_domains', nargs='+', help='Domains on which to pretrain')
+    parser.add_argument('--finetune_domain', nargs=1, help='Domain on which to finetune')
+    parser.add_argument('--pretrain_single_domain', action='store_true', help='Restrict pretraining to single-domain dialogs')
+    parser.add_argument('--finetune_single_domain', action='store_true', help='Restrict finetuning to single-domain dialogs')
     args = parser.parse_args()
     args.dout = os.path.join(args.dexp, args.model, args.nick)
     args.dropout = {d.split('=')[0]: float(d.split('=')[1]) for d in args.dropout}
