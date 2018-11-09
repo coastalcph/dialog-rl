@@ -59,15 +59,35 @@ class Featurizer:
 
 class UserInputFeaturizer(Featurizer):
 
-    def __init__(self):
+    def __init__(self, embeddings):
         super().__init__()
+        self.embeddings = embeddings
+
+    def featurize_word(self, word):
+        return np.array(self.embeddings.get(word), dtype=np.float32)
+
+    def featurize_turn(self, turn):
+        return [self.featurize_word(w) for w in turn if w in self.embeddings]
+
+    def featurize_dialog(self, dialog):
+        return [self.featurize_turn(t) for t in dialog.to_dict()['turns']]
 
 
 class ActionFeaturizer(Featurizer):
 
-    def __init__(self):
+    def __init__(self, embeddings):
         super().__init__()
+        self.embeddings = embeddings
 
+    def featurize_act(self, act):
+        vec = np.mean([np.array(self.embeddings.get(w), dtype=np.float32)
+                       for w in act if w in self.embeddings], axis=0)
+        print(vec, vec.shape)
+        return vec
+
+    def featurize_turn(self, turn):
+        print(turn)
+        return [self.featurize_act(a) for a in turn]
 
 class SlotFeaturizer(Featurizer):
 

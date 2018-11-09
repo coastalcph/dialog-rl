@@ -4,8 +4,8 @@ import os
 from pprint import pformat
 from importlib import import_module
 from vocab import Vocab
-from dataset import Dataset, Ontology
-from preprocess_data import dann
+from util.dataset import Dataset, Ontology
+from util.preprocess_data import dann
 
 
 def load_dataset(splits=('train', 'dev', 'test'), domains='all', strict=False,
@@ -25,6 +25,9 @@ def load_dataset(splits=('train', 'dev', 'test'), domains='all', strict=False,
         vocab = Vocab.from_dict(json.load(f))
     with open(os.path.join(path, 'emb.json')) as f:
         E = json.load(f)
+
+    w2v = {w: E[i] for i, w in enumerate(vocab.to_dict()['index2word'])}
+
     dataset = {}
     for split in splits:
         with open(os.path.join(path, '{}.json'.format(split))) as f:
@@ -32,7 +35,7 @@ def load_dataset(splits=('train', 'dev', 'test'), domains='all', strict=False,
             dataset[split] = Dataset.from_dict(json.load(f))
 
     logging.info('dataset sizes: {}'.format(pformat({k: len(v) for k, v in dataset.items()})))
-    return dataset, ontology, vocab, E
+    return dataset, ontology, vocab, w2v
 
 
 def get_models():
@@ -44,3 +47,5 @@ def load_model(model, *args, **kwargs):
     model = Model(*args, **kwargs)
     logging.info('loaded model {}'.format(Model))
     return model
+
+
