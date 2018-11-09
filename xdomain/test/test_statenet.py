@@ -21,5 +21,6 @@ s = torch.randn(1, DIM)
 
 sn = StateNet(fs, 200, 4)
 
-sn.forward_turn(u, a, s2v, 25)
+hidden = torch.randn(1, 1, 400)
+sn.forward_turn(u, a, s2v, hidden)
 

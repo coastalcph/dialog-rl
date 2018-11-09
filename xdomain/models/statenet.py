@@ -1,7 +1,6 @@
 import torch
 from torch import nn
 from torch.nn import functional as F
-from collections import defaultdict
 
 
 class UserUtteranceEncoder(nn.Module):
@@ -79,21 +78,33 @@ class PredictionEncoder(nn.Module):
 
     """
 
-    def __init__(self):
+    def __init__(self, in_dim, hidden_dim, out_dim):
         """
 
         """
         super().__init__()
+        self.rnn = nn.GRU(in_dim, hidden_dim)
+        self.linear = nn.Linear(hidden_dim, out_dim)
 
     def forward(self, inputs, hidden):
         """
-
+        Runs the RNN to compute outputs based on history from previous
+        slots and turns. We maintain the hidden state across calls to this
+        function.
         :param inputs:
         :param hidden:
         :return:
         """
-        # TODO
-        o = 0
+        batch_size, embedding_length = inputs.shape
+        # reshape input to length 1 sequence (RNN expects input shape
+        # [sequence_length, batch_size, embedding_length])
+        inputs = inputs.view(1, batch_size, embedding_length)
+        # compute output and new hidden state
+        rnn_out, hidden = self.rnn(inputs, hidden)
+        # reshape to [batch_size,
+        rnn_out = rnn_out.view(batch_size, -1)
+        o = F.relu(self.linear(rnn_out))
+        print(o.shape)
         return o, hidden
 
 
@@ -102,11 +113,12 @@ class ValueEncoder(nn.Module):
 
     """
 
-    def __init__(self):
+    def __init__(self, in_dim):
         """
 
         """
         super().__init__()
+        self.in_dim = in_dim
 
     def forward(self, value):
         """
@@ -114,8 +126,7 @@ class ValueEncoder(nn.Module):
         :param value:
         :return:
         """
-
-        v = 0
+        v = torch.randn(1, self.in_dim)  # TODO
         return v
 
 
@@ -151,13 +162,13 @@ class StateNet(nn.Module):
         u_in_dim = featurizers['user'].dimensionality
         a_in_dim = featurizers['actions'].dimensionality
         s_in_dim = featurizers['slots'].dimensionality
+        self.hidden_dim = hidden_dim
         self.user_utterance_encoder = UserUtteranceEncoder(u_in_dim, hidden_dim,
                                                            receptors)
-        self.hidden_dim = hidden_dim
         self.action_encoder = ActionEncoder(a_in_dim, hidden_dim)
         self.slot_encoder = SlotEncoder(s_in_dim, 2*hidden_dim)
-        self.prediction_encoder = PredictionEncoder()
-        self.value_encoder = ValueEncoder()
+        self.prediction_encoder = PredictionEncoder(2*hidden_dim, 2*hidden_dim, s_in_dim)
+        self.value_encoder = ValueEncoder(s_in_dim)
 
     def forward_turn(self, x_user, x_action, slots2values, hidden, labels=None):
         """
