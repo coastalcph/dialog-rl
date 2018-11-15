@@ -31,7 +31,11 @@ class UtteranceEncoder(nn.Module):
         :param user_utterance:
         :return:
         """
-        out = self.layer_norm(user_utterance)
+        try:
+            out = self.layer_norm(user_utterance)
+        except RuntimeError:
+            print(user_utterance, user_utterance.shape)
+
         out = F.relu(out)
         out = self.linear_out(out)
         return out
@@ -199,6 +203,14 @@ class StateNet(nn.Module):
         self.value_encoder = ValueEncoder(hidden_dim, embeddings)
         self.embeddings = embeddings
         self.embeddings_len = len(embeddings.get("i"))
+        self.device = self.get_device()
+
+    # @property
+    def get_device(self):
+        # if self.args.gpu is not None and torch.cuda.is_available():
+        #     return torch.device('cuda')
+        # else:
+        return torch.device('cpu')
 
     def embed(self, w, numpy=False):
         e = self.embeddings.get(w)
@@ -236,7 +248,7 @@ class StateNet(nn.Module):
         fy = self.utterance_encoder(x_sys)
 
         # iterate over slots and values, compute probabilities
-        for slot, values in tqdm(slots2values.items()):
+        for slot, values in slots2values.items():
             # compute encoding of inputs as described in StateNet paper, Sec. 2
             fs = self.slot_encoder(slot).view(-1)  # slot encoding
             # i = torch.cat((fu, fa), 0)
@@ -269,13 +281,16 @@ class StateNet(nn.Module):
         :param slots2values:
         :return:
         """
-        hidden = torch.randn(1, 1, self.hidden_dim)
+        hidden = torch.zeros(1, 1, self.hidden_dim)
         global_probs = {}
+        global_loss = torch.Tensor([0]).to(self.device)
 
         for x_user, x_action, x_sys, labels in turns:
-            _, turn_probs, hidden = self.forward_turn(x_user, x_action, x_sys,
-                                                      slots2values, hidden,
-                                                      labels)
+            loss, turn_probs, hidden = self.forward_turn(x_user, x_action,
+                                                         x_sys, slots2values,
+                                                         hidden, labels)
+
+            global_loss += loss
             for slot, values in slots2values.items():
                 global_probs[slot] = torch.zeros(len(values))
                 for v, value in enumerate(values):
@@ -288,7 +303,7 @@ class StateNet(nn.Module):
             score, argmax = probs.max(0)
             ys[slot] = int(argmax)
 
-        return ys
+        return ys, global_loss
 
     def save(self, path):
         torch.save(self.state_dict(), path)

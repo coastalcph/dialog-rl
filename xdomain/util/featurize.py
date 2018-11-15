@@ -17,6 +17,7 @@ def make_n_gram_bow(sequence, n, mode='sum', vectors=True):
     :return:
     """
     bow = []
+    assert len(sequence) > n, "Sequence too short (must be at least n+1 long)"
     if vectors:
         for i in range(len(sequence) - n + 1):
             bow.append(np.concatenate(sequence[i:i+n]))
@@ -107,11 +108,16 @@ class UserInputFeaturizer(Featurizer):
                         dtype=np.float)
 
     def featurize_turn(self, turn):
-        if not turn:
-            return torch.zeros(len(self.embeddings['i']) * self.n)
+        if type(turn) == str:
+            turn = turn.split()
+        turn = ['<sos>'] + turn + ['<eos>']
+        # if not turn:
+        #     return torch.zeros(len(self.embeddings['i']) * self.n)
         seq = [self.featurize_word(w) for w in turn if w in self.embeddings]
-        _m = min(self.n, len(seq))
-        ngrams = make_n_gram_bow(seq, _m, mode='sum')
+        if len(seq) < (self.n+1):
+            seq += [self.featurize_word("<eos>") for _ in range(self.n+1 -
+                                                                len(seq))]
+        ngrams = make_n_gram_bow(seq, self.n, mode='sum')
         # print(seq, ngrams, ngrams.shape)
         # print(turn )
         return torch.Tensor(ngrams)

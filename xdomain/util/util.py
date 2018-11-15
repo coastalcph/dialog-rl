@@ -32,7 +32,8 @@ def load_dataset(splits=('train', 'dev', 'test'), domains='all', strict=False,
     for split in splits:
         with open(os.path.join(path, '{}.json'.format(split))) as f:
             logging.warn('loading split {}'.format(split))
-            dataset[split] = Dataset.from_dict(json.load(f), domains, strict)
+            dataset[split] = Dataset.from_dict(json.load(f))
+            # dataset[split] = Dataset.from_dict(json.load(f), domains, strict)
 
     logging.info('dataset sizes: {}'.format(pformat({k: len(v) for k, v in dataset.items()})))
     return dataset, ontology, vocab, w2v
