@@ -20,13 +20,13 @@ Turn = namedtuple("Turn", ["user_utt", "system_act", "system_utt", "labels",
                            "belief_state"])
 Dialog = namedtuple("Dialog", ["turns"])
 
-parser = ArgumentParser(formatter_class=ArgumentDefaultsHelpFormatter)
-parser.add_argument('--path', help='absolute path to dialog-rl project', default='/home/joachim/projects/')
-args = parser.parse_args()
-base = args.path
+#parser = ArgumentParser(formatter_class=ArgumentDefaultsHelpFormatter)
+#parser.add_argument('--path', help='absolute path to dialog-rl project', default='/home/joachim/projects/')
+#args = parser.parse_args()
+#base = args.path
 
 data, ontology, vocab, w2v = util.load_dataset(splits=['dev'],
-    base_path=base+'dialog-rl/data/multiwoz/ann')
+    base_path='/home/victor/phd/projects/dialog_state_tracking/dialog-rl/data/multiwoz/ann')
 
 #utt_ftz = UserInputFeaturizer(w2v, n=M)
 #sys_ftz = UserInputFeaturizer(w2v, n=M)
