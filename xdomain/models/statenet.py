@@ -13,10 +13,70 @@ from collections import defaultdict
 from pprint import pformat
 from eval import evaluate_preds
 
-
 # TODO refactor such that encoder classes are declared within StateNet, allows
 # for better modularization and sharing of instances/variables such as
 # embeddings
+
+class MultiScaleReceptors(nn.Module):
+    """
+
+    """
+    def __init__(self, in_dim, out_dim, receptors):
+        super().__init__()
+        # Number of linear networks
+        self.receptors = receptors
+        # Init linear networks
+        for i in range(self.receptors):
+            setattr(self, 'linear_out_{}'.format(i), nn.Linear(in_dim, out_dim))
+
+    def forward(self, utt_ngram_rep):
+        out = []
+        # Get output for every linear network
+        for i in range(self.receptors):
+            lin_layer = getattr(self, 'linear_out_{}'.format(i))
+            out.append(lin_layer(utt_ngram_rep))
+        # Return concatenated ngram representation
+        return torch.cat(out)
+
+
+class MultiScaleReceptorsModule(nn.Module):
+    """
+
+    """
+    def __init__(self, in_dim, out_dim, receptors, n):
+        super().__init__()
+        self.receptors = receptors
+        self.n = n
+        #self.layer_norm = LayerNorm(in_dim)
+        self.layer_norm = LayerNorm(receptors * out_dim)
+        #self.linear_out = nn.Linear(in_dim, out_dim)
+        self.linear_out = nn.Linear(receptors * out_dim, out_dim)
+
+        # Initialize the c linear networks for each k-gram utt rep for 1 >= k >= n
+        for i in range(n):
+            msr_in_dim = in_dim * (i + 1)
+            setattr(self, 'linear_out_r{}'.format(i),
+                    MultiScaleReceptors(msr_in_dim, out_dim, self.receptors))
+
+    def forward(self, user_ngram_utterances):
+        """
+        :param user_ngram_utterances:
+        :return:
+        """
+        rets = []
+        # For each k-gram utterance representation, get output from MSR networks
+        for i in range(self.n):
+            msr = getattr(self, 'linear_out_r{}'.format(i))
+            msr_out = msr(user_ngram_utterances[i])
+            rets.append(msr_out)
+
+        rets = torch.stack(rets)
+        out = torch.sum(rets, 0)
+        out = self.layer_norm(out)
+        out = F.relu(out)
+        out = self.linear_out(out)
+
+        return out
 
 
 class UtteranceEncoder(nn.Module):
@@ -202,6 +262,8 @@ class StateNet(nn.Module):
         a_in_dim = input_action_dim
         s_in_dim = input_user_dim
         self.hidden_dim = hidden_dim
+        n = int(u_in_dim / a_in_dim)
+        self.utt_enc = MultiScaleReceptorsModule(a_in_dim, hidden_dim, receptors, n)
         self.utterance_encoder = UtteranceEncoder(u_in_dim, hidden_dim,
                                                   receptors)
         self.action_encoder = ActionEncoder(a_in_dim, hidden_dim)

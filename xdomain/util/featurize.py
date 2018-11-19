@@ -90,6 +90,46 @@ class Featurizer:
         pass
 
 
+class UserInputNgramFeaturizer(Featurizer):
+
+    def __init__(self, embeddings, n=2):
+        """
+
+        :param embeddings: Embeddings dictionary, mapping words to fix length
+        vectors
+        :param n: the order for n-gram concatenations (see StateNet paper)
+        """
+        super().__init__()
+        self.embeddings = embeddings
+        self.n = n
+
+    def featurize_word(self, word):
+        return np.array(self.embeddings.get(word.lower()),
+                        dtype=np.float)
+
+    def featurize_turn(self, turn):
+        if type(turn) == str:
+            turn = turn.split()
+        turn = ['<sos>'] + turn + ['<eos>']
+        # if not turn:
+        #     return torch.zeros(len(self.embeddings['i']) * self.n)
+        seq = [self.featurize_word(w) for w in turn if w in self.embeddings]
+        if len(seq) < (self.n+1):
+            seq += [self.featurize_word("<eos>") for _ in range(self.n+1 -
+                                                                len(seq))]
+        utt_reps = []
+        for k in range(self.n):
+            kgram = make_n_gram_bow(seq, k + 1, mode='sum')
+            utt_reps.append(torch.Tensor(kgram))
+        #print(len(turn), turn)
+        #print(len(utt_reps), [k.shape for k in utt_reps])
+        #return utt_reps[self.n - 1]
+        return utt_reps
+
+    def featurize_dialog(self, dialog):
+        return [self.featurize_turn(t) for t in dialog.to_dict()['turns']]
+
+
 class UserInputFeaturizer(Featurizer):
 
     def __init__(self, embeddings, n=2):
@@ -120,6 +160,7 @@ class UserInputFeaturizer(Featurizer):
         ngrams = make_n_gram_bow(seq, self.n, mode='sum')
         # print(seq, ngrams, ngrams.shape)
         # print(turn )
+        print(ngrams.shape)
         return torch.Tensor(ngrams)
 
     def featurize_dialog(self, dialog):

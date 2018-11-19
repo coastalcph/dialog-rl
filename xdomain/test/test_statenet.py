@@ -7,6 +7,8 @@ from tqdm import tqdm
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 import random
 from collections import namedtuple
+from pprint import pprint
+from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 
 DIM_INPUT = 400
 M = 3
@@ -18,11 +20,18 @@ Turn = namedtuple("Turn", ["user_utt", "system_act", "system_utt", "labels",
                            "belief_state"])
 Dialog = namedtuple("Dialog", ["turns"])
 
-data, ontology, vocab, w2v = util.load_dataset(splits=['train', 'dev'],
-    base_path="/home/joachim/projects/dialog-rl/data/multiwoz/ann")
+parser = ArgumentParser(formatter_class=ArgumentDefaultsHelpFormatter)
+parser.add_argument('--path', help='absolute path to dialog-rl project', default='/home/joachim/projects/')
+args = parser.parse_args()
+base = args.path
 
-utt_ftz = UserInputFeaturizer(w2v, n=M)
-sys_ftz = UserInputFeaturizer(w2v, n=M)
+data, ontology, vocab, w2v = util.load_dataset(splits=['dev'],
+    base_path=base+'dialog-rl/data/multiwoz/ann')
+
+#utt_ftz = UserInputFeaturizer(w2v, n=M)
+#sys_ftz = UserInputFeaturizer(w2v, n=M)
+utt_ftz = UserInputNgramFeaturizer(w2v, n=M)
+sys_ftz = UserInputNgramFeaturizer(w2v, n=M)
 act_ftz = ActionFeaturizer(w2v)
 # slt_ftz = SlotFeaturizer(w2v)
 # val_ftz = SlotFeaturizer(w2v)
