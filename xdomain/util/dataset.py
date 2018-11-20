@@ -63,24 +63,25 @@ class Turn:
 
 
 class Dialogue:
-
-    def __init__(self, dialogue_id, turns):
+    
+    def __init__(self, dialogue_id, turns, domain):
         self.id = dialogue_id
         self.turns = turns
-
+        self.domain = domain
+    
     def __len__(self):
         return len(self.turns)
-
+    
     def to_dict(self):
-        return {'dialogue_id': self.id, 'turns': [t.to_dict() for t in self.turns]}
-
+        return { 'dialogue_id': self.id, 'turns': [t.to_dict() for t in self.turns],'domain': self.domain}
+    
     @classmethod
     def from_dict(cls, d):
-        return cls(d['dialogue_id'], [Turn.from_dict(t) for t in d['turns']])
-
+        return cls(d['dialogue_id'],[Turn.from_dict(t) for t in d['turns']], d['domain'])
+    
     @classmethod
     def annotate_raw(cls, raw):
-        return cls(raw['dialogue_idx'], [Turn.annotate_raw(t) for t in raw['dialogue']])
+        return cls(raw['dialogue_idx'] ,[Turn.annotate_raw(t) for t in raw['dialogue']],raw['domain'])
 
 
 class Dataset:
@@ -116,15 +117,16 @@ class Dataset:
     def numericalize_(self, vocab):
         for t in self.iter_turns():
             t.numericalize_(vocab)
-
     def extract_ontology(self):
         slots = set()
         values = defaultdict(set)
         for t in self.iter_turns():
             for s, v in t.turn_label:
-                slots.add(s.lower())
+                slots.add(s)
                 values[s].add(v.lower())
+        
         return Ontology(sorted(list(slots)), {k: sorted(list(v)) for k, v in values.items()})
+
 
     def batch(self, batch_size, shuffle=False, whole_dialogs=False):
         if whole_dialogs:
