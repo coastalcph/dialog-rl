@@ -31,7 +31,6 @@ def str2bool(v):
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
 
-
 def fix_s2v(_s2v, dialogs):
     all_slots = set()
     s2v_new = {}
@@ -52,18 +51,14 @@ def train(model, data_tr, data_dv, s2v, args):
 
 
 def run(args):
-    base = args.path
-    
 
+    domains = args.pretrain_domains
+    strict = args.pretrain_single_domain
+    print('Training on domains: ',  domains)
+    print('Single-domain dialogues only?', strict)
     
-    domains = args.Domains
-    strict = args.strict
-    print('Looking at domains, ',  domains)
-    print('string flag:', strict)
-    
-
     data, ontology, vocab, w2v = util.load_dataset(splits=['train','dev'],
-                                                   base_path=base )
+                                                   base_path=args.path)
 
     utt_ftz = UserInputNgramFeaturizer(w2v, n=M)
     sys_ftz = UserInputNgramFeaturizer(w2v, n=M)
@@ -201,12 +196,12 @@ def run(args):
     random.shuffle(data_tr)
 
     for i, d in enumerate(data_tr):
-        if i == 100:
+        if i == args.debug_data_amount:
             break
         _data_tr.append(d)
 
     for i, d in enumerate(data_dv):
-        if i == 100:
+        if i == args.debug_data_amount:
             break
         _data_dv.append(d)
 
@@ -220,11 +215,18 @@ def run(args):
     data_f_dv = featurize_dialogs(data_dv, domains, strict)
     # print(data_tr[0].to_dict()['turns'][0]['system_acts'])
 
-    print("Initializing network.")
-    sn = StateNet(DIM_INPUT * M, DIM_INPUT, DIM_HIDDEN_ENC, N_RECEPTORS, w2v, args)
+    model = util.load_model(DIM_INPUT * M, DIM_INPUT, DIM_HIDDEN_ENC, N_RECEPTORS, w2v, args)
+    if args.resume:
+        model.load_best_save(directory=args.resume)
+    # else:
+    #     print(args.dout)
+    #     model.load_best_save(directory=args.dout)
+
+        # print("Initializing network.")
+        # model = StateNet(DIM_INPUT * M, DIM_INPUT, DIM_HIDDEN_ENC, N_RECEPTORS, w2v, args)
 
     print("Training...")
-    train(sn, data_f_tr, data_f_dv, s2v, args)
+    train(model, data_f_tr, data_f_dv, s2v, args)
 
 
 def get_args():
@@ -245,17 +247,17 @@ def get_args():
     parser.add_argument('--test', action='store_true', help='run in evaluation only mode')
     parser.add_argument('--gpu', type=int, help='which GPU to use')
     parser.add_argument('--dropout', nargs='*', help='dropout rates', default=['emb=0.2', 'local=0.2', 'global=0.2'])
-    parser.add_argument('--pretrain_domains', nargs='+', help='Domains on which to pretrain')
+    parser.add_argument('--pretrain_domains', nargs='+', help='Domains on which to pretrain', default='all')
     parser.add_argument('--finetune_domain', nargs=1, help='Domain on which to finetune')
     parser.add_argument('--pretrain_single_domain', action='store_true', help='Restrict pretraining to single-domain dialogs')
     parser.add_argument('--finetune_single_domain', action='store_true', help='Restrict finetuning to single-domain dialogs')
     parser.add_argument('--eta', help='factor for loss for binary slot filling prediction', default=0.5, type=float)
-    parser.add_argument('--path', help='absolute path to dialog-rl project',
-                        default='/Users/fcm220/Documents/statenet/dialog-rl/xdomain/util/ann/')
-    parser.add_argument('Domains',  nargs='+', default=['all'], help='List of domains to train on')
-    parser.add_argument('strict',   type=str2bool, default=False, help='TRUE OR FALSE')
+    parser.add_argument('--path', help='path to data files',
+                        default='../data/multiwoz/ann/')
+    parser.add_argument('--debug_data_amount', default=-1, type=int)
+    # parser.add_argument('Domains',  nargs='+', default=['all'], help='List of domains to train on')
+    # parser.add_argument('strict',   type=str2bool, default=False, help='TRUE OR FALSE')
     
-
     args = parser.parse_args()
     args.dout = os.path.join(args.dexp, args.model, args.nick)
     args.dropout = {d.split('=')[0]: float(d.split('=')[1]) for d in args.dropout}

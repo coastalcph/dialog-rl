@@ -1,4 +1,5 @@
 import os
+import re
 import logging
 import torch
 from torch import nn
@@ -278,6 +279,9 @@ class StateNet(nn.Module):
         self.optimizer = None
         self.args = args
 
+    def set_epochs_trained(self, e):
+        self.epochs_trained = e
+
     def set_optimizer(self):
         self.optimizer = optim.Adam(self.parameters(), lr=self.args.lr)
 
@@ -425,6 +429,10 @@ class StateNet(nn.Module):
         for epoch in range(1, args.epochs+1):
             # logger.info('starting epoch {}'.format(epoch))
 
+            if not hasattr(self, "epochs_trained"):
+                self.set_epochs_trained(0)
+            self.epochs_trained += 1
+
             # train and update parameters
             self.train()
             for dialog in tqdm(dialogs_train):
@@ -436,7 +444,7 @@ class StateNet(nn.Module):
                 track['loss'].append(loss.item())
 
             # evalute on train and dev
-            summary = {'iteration': iteration, 'epoch': epoch}
+            summary = {'iteration': iteration, 'epoch': self.epochs_trained}
             for k, v in track.items():
                 summary[k] = sum(v) / len(v)
             summary.update({'eval_train_{}'.format(k):v for k, v in
@@ -457,7 +465,8 @@ class StateNet(nn.Module):
                           identifier='epoch={epoch},iter={iteration},'
                                      'train_{key}={train},dev_{key}={dev}'
                                      ''.format(
-                                        epoch=epoch, iteration=iteration,
+                                        epoch=self.epochs_trained,
+                                        iteration=iteration,
                                         train=best_train, dev=best_dev,
                                         key=args.stop)
                           )
@@ -486,13 +495,53 @@ class StateNet(nn.Module):
         fname = '{}/{}.t7'.format(self.args.dout, identifier)
         logging.info('saving model to {}'.format(fname))
         state = {
-            'args':vars(self.args),
-            'model':self.state_dict(),
-            'summary':summary,
-            'optimizer':self.optimizer.state_dict(),
+            'args': vars(self.args),
+            'model': self.state_dict(),
+            'summary': summary,
+            'optimizer': self.optimizer.state_dict(),
+            'epoch': self.epochs_trained
         }
         torch.save(state, fname)
 
     def load(self, path):
-        self.load_state_dict(path)
+        logging.info('loading model from {}'.format(path))
+        state = torch.load(path)
+        self.load_state_dict(state['model'])
+        self.set_optimizer()
+        self.optimizer.load_state_dict(state['optimizer'])
+        resume_from_epoch = state.get('epoch', 0)
+        self.set_epochs_trained(resume_from_epoch)
+        print("Resuming from epoch {}".format(resume_from_epoch))
+
+    def prune_saves(self, n_keep=5):
+            scores_and_files = self.get_saves()
+            if len(scores_and_files) > n_keep:
+                for score, fname in scores_and_files[n_keep:]:
+                    os.remove(fname)
+
+    def load_best_save(self, directory):
+        if directory is None:
+            directory = self.args.dout
+
+        scores_and_files = self.get_saves(directory=directory)
+        if scores_and_files:
+            assert scores_and_files, 'no saves exist at {}'.format(directory)
+            score, fname = scores_and_files[0]
+            self.load(fname)
+
+    def get_saves(self, directory=None):
+        if directory is None:
+            directory = self.args.dout
+        files = [f for f in os.listdir(directory) if f.endswith('.t7')]
+        scores = []
+        for fname in files:
+            re_str = r'dev_{}=([0-9\.]+)'.format(self.args.stop)
+            dev_acc = re.findall(re_str, fname)
+            if dev_acc:
+                score = float(dev_acc[0].strip('.'))
+                scores.append((score, os.path.join(directory, fname)))
+        if not scores:
+            raise Exception('No files found!')
+        scores.sort(key=lambda tup:tup[0], reverse=True)
+        return scores
 

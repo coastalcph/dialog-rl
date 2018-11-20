@@ -6,6 +6,7 @@ from importlib import import_module
 from vocab import Vocab
 from util.dataset import Dataset, Ontology
 from util.preprocess_data import dann
+# from models.statenet import StateNet
 
 
 def load_dataset(splits=('train', 'dev', 'test'), domains='all', strict=False,
@@ -43,10 +44,10 @@ def get_models():
     return [m.replace('.py', '') for m in os.listdir('models') if not m.startswith('_') and m != 'model']
 
 
-def load_model(model, *args, **kwargs):
-    Model = import_module('models.{}'.format(model)).Model
-    model = Model(*args, **kwargs)
-    logging.info('loaded model {}'.format(Model))
+def load_model(*args, **kwargs):
+    StateNet = import_module("models.statenet").StateNet
+    model = StateNet(*args, **kwargs)
+    logging.info('loaded model.')
     return model
 
 
