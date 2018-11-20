@@ -331,6 +331,7 @@ class StateNet(nn.Module):
         binary_filling_probs = {}
 
         # Encode user and action representations offline
+        print(turn.user_utt)
         fu = self.utterance_encoder(turn.user_utt)  # user input encoding
         fa = self.action_encoder(turn.system_act)  # action input encoding
         fy = self.utterance_encoder(turn.system_utt)
