@@ -8,6 +8,7 @@ from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 import random
 from collections import namedtuple
 from pprint import pprint
+import argparse
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 
 DIM_INPUT = 400
@@ -21,6 +22,16 @@ Turn = namedtuple("Turn", ["user_utt", "system_act", "system_utt", "labels",
 Dialog = namedtuple("Dialog", ["turns"])
 
 
+def str2bool(v):
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
+
+
+
 def fix_s2v(_s2v, dialogs):
     all_slots = set()
     s2v_new = {}
@@ -31,7 +42,7 @@ def fix_s2v(_s2v, dialogs):
                 all_slots.add(s)
 
     for s in all_slots:
-        s2v_new[s] = _s2v[s.lower()]
+        s2v_new[s] = _s2v[s] #_s2v[s.lower()]  changed since the new ontology has original casing
 
     return s2v_new
 
@@ -42,37 +53,134 @@ def train(model, data_tr, data_dv, s2v, args):
 
 def run(args):
     base = args.path
+    
+
+    
+    domains = args.Domains
+    strict = args.strict
+    print('Looking at domains, ',  domains)
+    print('string flag:', strict)
+    
+
     data, ontology, vocab, w2v = util.load_dataset(splits=['train','dev'],
-                                                   base_path=base + 'dialog-rl/data/multiwoz/ann')
+                                                   base_path=base )
 
     utt_ftz = UserInputNgramFeaturizer(w2v, n=M)
     sys_ftz = UserInputNgramFeaturizer(w2v, n=M)
     act_ftz = ActionFeaturizer(w2v)
 
-    def featurize_dialogs(data):
+    def featurize_dialogs(data, domains, strict):
         featurized_dialogs = []
         for dg in tqdm(data):
             featurized_turns = []
             dg = dg.to_dict()
-            for t in dg['turns']:
-                utt = t['transcript']
-                sys = t['system_transcript']
-                act = t['system_acts']
-                bst = t['belief_state']
-                lbl = [(s, v.lower()) for s, v in t['turn_label']]
-                dom = [slot.split("-")[0] for slot, _ in lbl]
-                x_utt = utt_ftz.featurize_turn(utt)
-                x_act = act_ftz.featurize_turn(act)
-                x_sys = sys_ftz.featurize_turn(sys)
-                ys = {}
-                for slot, val in lbl:
-                    # x_slt = slt_ftz.featurize_slot(slot)
-                    # x_val = val_ftz.featurize_slot(val)
-                    ys[slot] = torch.zeros(len(s2v[slot]))
-                    idx = s2v[slot].index(val)
-                    ys[slot][idx] = 1
-                featurized_turns.append(Turn(x_utt, x_act, x_sys, ys, bst))
-            featurized_dialogs.append(Dialog(featurized_turns))
+    
+
+            if strict == True:
+                if set(dg['domain']) == set(domains):
+                    #if the dialogue domain list is the same as our domain list to train on
+
+                    for t in dg['turns']:
+                        utt = t['transcript']
+                        sys = t['system_transcript']
+                        act = t['system_acts']
+                        bst = t['belief_state']
+                        lbl = [(s, v.lower()) for s, v in t['turn_label']]
+                        dom = [slot.split("-")[0] for slot, _ in lbl]
+                        x_utt = utt_ftz.featurize_turn(utt)
+                        x_act = act_ftz.featurize_turn(act)
+                        x_sys = sys_ftz.featurize_turn(sys)
+                        ys = {}
+                        for slot, val in lbl:
+                            # x_slt = slt_ftz.featurize_slot(slot)
+                            # x_val = val_ftz.featurize_slot(val)
+                            ys[slot] = torch.zeros(len(s2v[slot]))
+                            idx = s2v[slot].index(val)
+                            ys[slot][idx] = 1
+                        featurized_turns.append(Turn(x_utt, x_act, x_sys, ys, bst))
+                    featurized_dialogs.append(Dialog(featurized_turns))
+                
+
+                elif len(dg['domain']) == 1 and dg['domain'][0] in domains:
+                    
+                    #if the dialogue has a single domain which is in our list of domains
+                    
+                    
+                    for t in dg['turns']:
+                        utt = t['transcript']
+                        sys = t['system_transcript']
+                        act = t['system_acts']
+                        bst = t['belief_state']
+                        lbl = [(s, v.lower()) for s, v in t['turn_label']]
+                        dom = [slot.split("-")[0] for slot, _ in lbl]
+                        x_utt = utt_ftz.featurize_turn(utt)
+                        x_act = act_ftz.featurize_turn(act)
+                        x_sys = sys_ftz.featurize_turn(sys)
+                        ys = {}
+                        for slot, val in lbl:
+                            # x_slt = slt_ftz.featurize_slot(slot)
+                            # x_val = val_ftz.featurize_slot(val)
+                            ys[slot] = torch.zeros(len(s2v[slot]))
+                            idx = s2v[slot].index(val)
+                            ys[slot][idx] = 1
+                        featurized_turns.append(Turn(x_utt, x_act, x_sys, ys, bst))
+                    featurized_dialogs.append(Dialog(featurized_turns))
+            
+
+
+            elif strict==False :
+            
+                _1 = set(dg['domain'])
+                _2 = set(domains)
+                inter = _1.intersection(_2)
+                
+                if len(list(inter)) >0:
+                    #if there is an intersection of at least one domain
+                    
+                    
+                    for t in dg['turns']:
+                        utt = t['transcript']
+                        sys = t['system_transcript']
+                        act = t['system_acts']
+                        bst = t['belief_state']
+                        lbl = [(s, v.lower()) for s, v in t['turn_label']]
+                        dom = [slot.split("-")[0] for slot, _ in lbl]
+                        x_utt = utt_ftz.featurize_turn(utt)
+                        x_act = act_ftz.featurize_turn(act)
+                        x_sys = sys_ftz.featurize_turn(sys)
+                        ys = {}
+                        for slot, val in lbl:
+                            # x_slt = slt_ftz.featurize_slot(slot)
+                            # x_val = val_ftz.featurize_slot(val)
+                            ys[slot] = torch.zeros(len(s2v[slot]))
+                            idx = s2v[slot].index(val)
+                            ys[slot][idx] = 1
+                        featurized_turns.append(Turn(x_utt, x_act, x_sys, ys, bst))
+                    featurized_dialogs.append(Dialog(featurized_turns))
+            
+
+            elif 'all' in domains:
+            #if all then we ignore all conditions and featurize everything
+                for t in dg['turns']:
+                    utt = t['transcript']
+                    sys = t['system_transcript']
+                    act = t['system_acts']
+                    bst = t['belief_state']
+                    lbl = [(s, v.lower()) for s, v in t['turn_label']]
+                    dom = [slot.split("-")[0] for slot, _ in lbl]
+                    x_utt = utt_ftz.featurize_turn(utt)
+                    x_act = act_ftz.featurize_turn(act)
+                    x_sys = sys_ftz.featurize_turn(sys)
+                    ys = {}
+                    for slot, val in lbl:
+                        # x_slt = slt_ftz.featurize_slot(slot)
+                        # x_val = val_ftz.featurize_slot(val)
+                        ys[slot] = torch.zeros(len(s2v[slot]))
+                        idx = s2v[slot].index(val)
+                        ys[slot][idx] = 1
+                    featurized_turns.append(Turn(x_utt, x_act, x_sys, ys, bst))
+                featurized_dialogs.append(Dialog(featurized_turns))
+        print('length of featurized dialogs: ', len(featurized_dialogs))
         return featurized_dialogs
 
     # utt_ftz = UserInputFeaturizer(w2v, n=M)
@@ -108,8 +216,8 @@ def run(args):
     s2v = fix_s2v(s2v, data_tr + data_dv)
 
     print("Featurizing...")
-    data_f_tr = featurize_dialogs(data_tr)
-    data_f_dv = featurize_dialogs(data_dv)
+    data_f_tr = featurize_dialogs(data_tr, domains, strict)
+    data_f_dv = featurize_dialogs(data_dv, domains, strict)
     # print(data_tr[0].to_dict()['turns'][0]['system_acts'])
 
     print("Initializing network.")
@@ -143,7 +251,10 @@ def get_args():
     parser.add_argument('--finetune_single_domain', action='store_true', help='Restrict finetuning to single-domain dialogs')
     parser.add_argument('--eta', help='factor for loss for binary slot filling prediction', default=0.5, type=float)
     parser.add_argument('--path', help='absolute path to dialog-rl project',
-                        default='/home/joachim/projects/')
+                        default='/Users/fcm220/Documents/statenet/dialog-rl/xdomain/util/ann/')
+    parser.add_argument('Domains',  nargs='+', default=['all'], help='List of domains to train on')
+    parser.add_argument('strict',   type=str2bool, default=False, help='TRUE OR FALSE')
+    
 
     args = parser.parse_args()
     args.dout = os.path.join(args.dexp, args.model, args.nick)

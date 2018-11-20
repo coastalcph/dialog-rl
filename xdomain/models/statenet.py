@@ -387,6 +387,8 @@ class StateNet(nn.Module):
         global_loss = torch.Tensor([0]).to(self.device)
 
         ys_turn = []
+        
+      
 
         for turn in dialog.turns:
             loss, turn_probs, hidden = self.forward_turn(turn, slots2values,
