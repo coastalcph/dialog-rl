@@ -264,8 +264,8 @@ class StateNet(nn.Module):
         self.hidden_dim = hidden_dim
         n = int(u_in_dim / a_in_dim)
         self.utt_enc = MultiScaleReceptorsModule(a_in_dim, hidden_dim, receptors, n)
-        self.utterance_encoder = UtteranceEncoder(u_in_dim, hidden_dim,
-                                                  receptors)
+        #self.utterance_encoder = UtteranceEncoder(u_in_dim, hidden_dim,
+        #                                          receptors)
         self.action_encoder = ActionEncoder(a_in_dim, hidden_dim)
         self.slot_encoder = SlotEncoder(s_in_dim, 3*hidden_dim, embeddings)
         self.prediction_encoder = PredictionEncoder(3*hidden_dim, hidden_dim, hidden_dim)
@@ -331,10 +331,11 @@ class StateNet(nn.Module):
         binary_filling_probs = {}
 
         # Encode user and action representations offline
-        print(turn.user_utt)
-        fu = self.utterance_encoder(turn.user_utt)  # user input encoding
+        #fu = self.utterance_encoder(turn.user_utt)  # user input encoding
+        fu = self.utt_enc(turn.user_utt)  # user input encoding
         fa = self.action_encoder(turn.system_act)  # action input encoding
-        fy = self.utterance_encoder(turn.system_utt)
+        #fy = self.utterance_encoder(turn.system_utt)
+        fy = self.utt_enc(turn.system_utt)
 
         # iterate over slots and values, compute probabilities
         for slot in slots2values.keys():
