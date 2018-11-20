@@ -272,4 +272,3 @@ if __name__ == '__main__':
 
 # hidden = torch.randn(1, 1, DIM_HIDDEN_LSTM)
 # sn.forward_turn(u, a, s2v, hidden)
-
