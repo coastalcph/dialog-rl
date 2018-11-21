@@ -225,6 +225,7 @@ def run(args):
         # print("Initializing network.")
         # model = StateNet(DIM_INPUT * M, DIM_INPUT, DIM_HIDDEN_ENC, N_RECEPTORS, w2v, args)
 
+    model = model.to(model.device)
     print("Training...")
     train(model, data_f_tr, data_f_dv, s2v, args)
 

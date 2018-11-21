@@ -275,9 +275,10 @@ class StateNet(nn.Module):
         self.value_encoder = ValueEncoder(hidden_dim, embeddings)
         self.embeddings = embeddings
         self.embeddings_len = len(embeddings.get("i"))
-        self.device = self.get_device()
-        self.optimizer = None
         self.args = args
+        self.device = self.device()
+        self.optimizer = None
+
 
     def set_epochs_trained(self, e):
         self.epochs_trained = e
@@ -297,11 +298,11 @@ class StateNet(nn.Module):
         return logger
 
     # @property
-    def get_device(self):
-        # if self.args.gpu is not None and torch.cuda.is_available():
-        #     return torch.device('cuda')
-        # else:
-        return torch.device('cpu')
+    def device(self):
+        if self.args.gpu is not None and torch.cuda.is_available():
+            return torch.device('cuda')
+        else:
+            return torch.device('cpu')
 
     def embed(self, w, numpy=False):
         e = self.embeddings.get(w)
