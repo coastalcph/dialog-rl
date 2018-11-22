@@ -132,7 +132,7 @@ class SlotEncoder(nn.Module):
 
     """
 
-    def __init__(self, in_dim, out_dim, embeddings):
+    def __init__(self, in_dim, out_dim, embeddings, device):
         """
 
         :param in_dim:
@@ -142,6 +142,7 @@ class SlotEncoder(nn.Module):
         self.embeddings = embeddings
         self.embeddings_len = len(embeddings.get("i"))
         self.linear = nn.Linear(self.embeddings_len, out_dim)
+        self.device = device
 
     def forward(self, slot):
         """
@@ -157,7 +158,7 @@ class SlotEncoder(nn.Module):
         if not vecs:
             vecs = [[0 for _ in range(len(self.embeddings.get("i")))]]
 
-        sv = torch.Tensor(vecs)
+        sv = torch.Tensor(vecs).to(self.device)
         sv, _ = torch.max(sv, 0)
         # print(domain, slot, words, len(vecs), sv.shape)
 
@@ -203,7 +204,7 @@ class ValueEncoder(nn.Module):
     """
 
     """
-    def __init__(self, out_dim, embeddings):
+    def __init__(self, out_dim, embeddings, device):
         """
 
         :param in_dim:
@@ -213,6 +214,7 @@ class ValueEncoder(nn.Module):
         self.embeddings = embeddings
         self.embeddings_len = len(embeddings.get("i"))
         self.linear = nn.Linear(self.embeddings_len, out_dim)
+        self.device = device
 
     def forward(self, slot):
         """
@@ -223,7 +225,7 @@ class ValueEncoder(nn.Module):
         v = self.embeddings.get(slot)
         if not v:
             v = torch.zeros(len(self.embeddings.get("i")))
-        v = torch.Tensor(v)
+        v = torch.Tensor(v).to(self.device)
         return F.relu(self.linear(v))
 
 
@@ -265,20 +267,21 @@ class StateNet(nn.Module):
         self.hidden_dim = hidden_dim
         n = int(u_in_dim / a_in_dim)
         self.utt_enc = MultiScaleReceptorsModule(a_in_dim, hidden_dim, receptors, n)
+        
+        self.args = args
+        self.device = self.get_device()
+        
         #self.utterance_encoder = UtteranceEncoder(u_in_dim, hidden_dim,
         #                                          receptors)
         self.action_encoder = ActionEncoder(a_in_dim, hidden_dim)
-        self.slot_encoder = SlotEncoder(s_in_dim, 3*hidden_dim, embeddings)
+        self.slot_encoder = SlotEncoder(s_in_dim, 3*hidden_dim, embeddings, self.device)
         self.prediction_encoder = PredictionEncoder(3*hidden_dim, hidden_dim, hidden_dim)
         self.slot_fill_indicator = nn.Linear(hidden_dim, 1)
 
-        self.value_encoder = ValueEncoder(hidden_dim, embeddings)
+        self.value_encoder = ValueEncoder(hidden_dim, embeddings, self.device)
         self.embeddings = embeddings
         self.embeddings_len = len(embeddings.get("i"))
-        self.args = args
-        self.device = self.device()
         self.optimizer = None
-
 
     def set_epochs_trained(self, e):
         self.epochs_trained = e
@@ -298,10 +301,10 @@ class StateNet(nn.Module):
         return logger
 
     # @property
-    def device(self):
-        if self.args.gpu is not None and torch.cuda.is_available():
+    def get_device(self):
+         if self.args.gpu is not None and torch.cuda.is_available():
             return torch.device('cuda')
-        else:
+         else:
             return torch.device('cpu')
 
     def embed(self, w, numpy=False):
@@ -337,15 +340,20 @@ class StateNet(nn.Module):
 
         # Encode user and action representations offline
         #fu = self.utterance_encoder(turn.user_utt)  # user input encoding
-        fu = self.utt_enc(turn.user_utt)  # user input encoding
-        fa = self.action_encoder(turn.system_act)  # action input encoding
+        utt = [t.to(self.device) for t in turn.user_utt]
+        act = turn.system_act.to(self.device)
+        sys = [t.to(self.device) for t in turn.system_utt]
+        fu = self.utt_enc(utt)  # user input encoding
+        fa = self.action_encoder(act)  # action input encoding
         #fy = self.utterance_encoder(turn.system_utt)
-        fy = self.utt_enc(turn.system_utt)
+        fy = self.utt_enc(sys)
+
+        loss_updates = torch.Tensor([0]).to(self.device)
 
         # iterate over slots and values, compute probabilities
         for slot in slots2values.keys():
             # compute encoding of inputs as described in StateNet paper, Sec. 2
-            fs = self.slot_encoder(slot).view(-1)  # slot encoding
+            fs = self.slot_encoder(slot).view(-1).to(self.device)  # slot encoding
             # i = torch.cat((fu, fa), 0)
             # i = F.mul(fs, i)
             i = F.mul(fs, torch.cat((fu, fa, fy), 0))  # inputs encoding
@@ -360,23 +368,25 @@ class StateNet(nn.Module):
 
             if binary_filling_probs[slot] > 0.5:
                 for v, value in enumerate(values):
-                    venc = self.value_encoder(value)
+                    venc = self.value_encoder(value).to(self.device)
                     # ... by computing 2-Norm distance following paper, Sec. 2.6
                     probs[slot][v] = -torch.dist(o, venc)
                 probs[slot] = F.softmax(probs[slot], 0)  # softmax it!
 
+        loss = torch.Tensor([0]).to(self.device)
         if self.training:
-            loss = 0
             for slot in slots2values.keys():
                 # 1 if slot in turn.labels (meaning it's filled), 0 else
-                gold_slot_filling = torch.tensor(float(slot in turn.labels))
+                gold_slot_filling = torch.tensor(float(slot in turn.labels)).to(self.device)
                 loss += self.args.eta * F.binary_cross_entropy(
                     binary_filling_probs[slot],
-                    gold_slot_filling)
+                    gold_slot_filling).to(self.device)
+                loss_updates += 1
                 if slot in turn.labels and binary_filling_probs[slot] > 0.5:
-                    loss += F.binary_cross_entropy(probs[slot], turn.labels[slot])
-        else:
-            loss = torch.Tensor([0]).to(self.device)
+                    loss += F.binary_cross_entropy(probs[slot], turn.labels[slot]).to(self.device)
+                    loss_updates += 1
+
+        loss = loss / loss_updates
 
         return loss, probs, hidden
 
@@ -387,18 +397,15 @@ class StateNet(nn.Module):
         :param slots2values:
         :return:
         """
-        hidden = torch.zeros(1, 1, self.hidden_dim)
+        hidden = torch.zeros(1, 1, self.hidden_dim).to(self.device)
         global_probs = {}
         global_loss = torch.Tensor([0]).to(self.device)
 
         ys_turn = []
-        
-      
 
         for turn in dialog.turns:
             loss, turn_probs, hidden = self.forward_turn(turn, slots2values,
                                                          hidden)
-
             global_loss += loss
             turn_preds = {}
             for slot, values in slots2values.items():
@@ -418,6 +425,7 @@ class StateNet(nn.Module):
             score, argmax = probs.max(0)
             ys[slot] = int(argmax)
 
+        global_loss = global_loss / len(dialog.turns)
         return ys, ys_turn, global_loss
 
     def run_train(self, dialogs_train, dialogs_dev, s2v, args):
@@ -471,7 +479,7 @@ class StateNet(nn.Module):
                                         train=best_train, dev=best_dev,
                                         key=args.stop)
                           )
-                # self.prune_saves()
+                self.prune_saves()
                 # dialogs_dev.record_preds(  #TODO self.run_pred returns list of tuples (predictions_dialog, predictions_turn)
                 #     preds=self.run_pred(dialogs_dev, s2v, self.args),
                 #     to_file=os.path.join(self.args.dout, 'dev.pred.json'),

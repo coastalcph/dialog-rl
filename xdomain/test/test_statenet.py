@@ -12,10 +12,10 @@ import argparse
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 
 DIM_INPUT = 400
-M = 3
-DIM_HIDDEN_LSTM = 256
+M = 2
+DIM_HIDDEN_LSTM = 128
 DIM_HIDDEN_ENC = 128
-N_RECEPTORS = 4
+N_RECEPTORS = 2
 
 Turn = namedtuple("Turn", ["user_utt", "system_act", "system_utt", "labels",
                            "belief_state"])
@@ -66,10 +66,13 @@ def run(args):
 
     def featurize_dialogs(data, domains, strict):
         featurized_dialogs = []
+        
         for dg in tqdm(data):
             featurized_turns = []
             dg = dg.to_dict()
     
+            if args.max_dialog_length > 0 and len(dg['turns']) > args.max_dialog_length:
+                continue
 
             if strict == True:
                 if set(dg['domain']) == set(domains):
@@ -218,6 +221,8 @@ def run(args):
     model = util.load_model(DIM_INPUT * M, DIM_INPUT, DIM_HIDDEN_ENC, N_RECEPTORS, w2v, args)
     if args.resume:
         model.load_best_save(directory=args.resume)
+
+
     # else:
     #     print(args.dout)
     #     model.load_best_save(directory=args.dout)
@@ -226,6 +231,11 @@ def run(args):
         # model = StateNet(DIM_INPUT * M, DIM_INPUT, DIM_HIDDEN_ENC, N_RECEPTORS, w2v, args)
 
     model = model.to(model.device)
+    model = model.cuda()
+    for name, param in model.named_parameters():
+        print(name, param.device)
+
+
     print("Training...")
     train(model, data_f_tr, data_f_dv, s2v, args)
 
@@ -256,6 +266,7 @@ def get_args():
     parser.add_argument('--path', help='path to data files',
                         default='../data/multiwoz/ann/')
     parser.add_argument('--debug_data_amount', default=-1, type=int)
+    parser.add_argument('--max_dialog_length', default=-1, type=int)
     # parser.add_argument('Domains',  nargs='+', default=['all'], help='List of domains to train on')
     # parser.add_argument('strict',   type=str2bool, default=False, help='TRUE OR FALSE')
     
