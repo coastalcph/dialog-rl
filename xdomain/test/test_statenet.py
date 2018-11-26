@@ -139,7 +139,7 @@ def run(args):
                                   args.max_train_dialogs)
     data_f_dv = featurize_dialogs(data_dv, domains, strict,
                                   args.max_dev_dialogs)
-    # print(data_tr[0].to_dict()['turns'][0]['system_acts'])
+    # print(data_tr[0].to_dict()['turns'][0]['sy'])
 
     model = util.load_model(DIM_INPUT * M, DIM_INPUT, DIM_HIDDEN_ENC,
                             N_RECEPTORS, w2v, args)
