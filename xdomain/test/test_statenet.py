@@ -64,7 +64,7 @@ def run(args):
     sys_ftz = UserInputNgramFeaturizer(w2v, n=M)
     act_ftz = ActionFeaturizer(w2v)
 
-    def featurize_dialogs(_data, _domains, _strict):
+    def featurize_dialogs(_data, _domains, _strict, max_dialogs=-1):
         featurized_dialogs = []
 
         for dg in tqdm(_data):
@@ -112,6 +112,9 @@ def run(args):
                                              ys, bst))
             featurized_dialogs.append(Dialog(featurized_turns))
 
+        if max_dialogs > 0:
+            featurized_dialogs = featurized_dialogs[:max_dialogs]
+
         print('length of featurized dialogs: ', len(featurized_dialogs))
         return featurized_dialogs
 
@@ -143,7 +146,8 @@ def run(args):
 
     print("Featurizing...")
     data_f_tr = featurize_dialogs(data_tr, domains, strict)
-    data_f_dv = featurize_dialogs(data_dv, domains, strict)
+    data_f_dv = featurize_dialogs(data_dv, domains, strict,
+                                  args.max_dev_dialogs)
     # print(data_tr[0].to_dict()['turns'][0]['system_acts'])
 
     model = util.load_model(DIM_INPUT * M, DIM_INPUT, DIM_HIDDEN_ENC,
@@ -186,10 +190,12 @@ def get_args():
                         default='../data/multiwoz/ann/')
     parser.add_argument('--debug_data_amount', default=-1, type=int)
     parser.add_argument('--max_dialog_length', default=-1, type=int)
+    parser.add_argument('--max_dev_dialogs', default=-1, type=int)
     parser.add_argument('--elmo', action='store_true', help="If True, use ELMo for embedding")
     parser.add_argument('--elmo_weights', default='res/elmo/elmo_2x1024_128_2048cnn_1xhighway_weights.hdf5')
     parser.add_argument('--elmo_options',
                         default='res/elmo/elmo_2x1024_128_2048cnn_1xhighway_options.json')
+
 
     args = parser.parse_args()
     args.dout = os.path.join(args.dexp, args.model, args.nick)
