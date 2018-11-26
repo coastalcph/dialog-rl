@@ -160,7 +160,6 @@ class UserInputFeaturizer(Featurizer):
         ngrams = make_n_gram_bow(seq, self.n, mode='sum')
         # print(seq, ngrams, ngrams.shape)
         # print(turn )
-        print(ngrams.shape)
         return torch.Tensor(ngrams)
 
     def featurize_dialog(self, dialog):

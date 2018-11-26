@@ -13,10 +13,31 @@ from util import util
 from collections import defaultdict
 from pprint import pformat
 from eval import evaluate_preds
+from allennlp.commands.elmo import ElmoEmbedder
 
 # TODO refactor such that encoder classes are declared within StateNet, allows
 # for better modularization and sharing of instances/variables such as
 # embeddings
+
+
+class ElmoEncoder(nn.Module):
+
+    def __init__(self, elmo, args, hidden_dim):
+        super().__init__()
+        self.elmo = elmo
+        self.linear = nn.Linear(3*256, hidden_dim)
+
+    def forward(self, tokens):
+        # batch_to_embeddings because returns torch tensor, everything can stay
+        # on GPU this way. Returns tuple ([batch_size, layers, tokens, hidden],
+        # mask). We just get the first item in that batch as there's just one.
+        if type(tokens) == str:
+            tokens = tokens.split()
+        tokens = ["<bos>"] + tokens + ["<eos>"]
+        e_toks = self.elmo.batch_to_embeddings(tokens)[0][0]
+        e_flat = torch.max(e_toks, dim=1)[0].view(-1)  # max over tokens & flatten
+        return torch.sigmoid(self.linear(e_flat))
+
 
 class MultiScaleReceptors(nn.Module):
     """
@@ -261,27 +282,47 @@ class StateNet(nn.Module):
         :param embeddings:
         """
         super().__init__()
-        u_in_dim = input_user_dim
-        a_in_dim = input_action_dim
-        s_in_dim = input_user_dim
+
         self.hidden_dim = hidden_dim
-        n = int(u_in_dim / a_in_dim)
-        self.utt_enc = MultiScaleReceptorsModule(a_in_dim, hidden_dim, receptors, n)
-        
         self.args = args
         self.device = self.get_device()
-        
-        #self.utterance_encoder = UtteranceEncoder(u_in_dim, hidden_dim,
-        #                                          receptors)
-        self.action_encoder = ActionEncoder(a_in_dim, hidden_dim)
-        self.slot_encoder = SlotEncoder(s_in_dim, 3*hidden_dim, embeddings, self.device)
-        self.prediction_encoder = PredictionEncoder(3*hidden_dim, hidden_dim, hidden_dim)
-        self.slot_fill_indicator = nn.Linear(hidden_dim, 1)
 
-        self.value_encoder = ValueEncoder(hidden_dim, embeddings, self.device)
-        self.embeddings = embeddings
-        self.embeddings_len = len(embeddings.get("i"))
+        if args.elmo:
+            if args.gpu:
+                elmo = ElmoEmbedder(weight_file=args.elmo_weights,
+                                    options_file=args.elmo_options,
+                                    cuda_device=args.gpu)
+            else:
+                elmo = ElmoEmbedder(weight_file=args.elmo_weights,
+                                    options_file=args.elmo_options)
+
+            self.utt_enc = ElmoEncoder(elmo, args, hidden_dim)
+            self.action_encoder = ElmoEncoder(elmo, args, hidden_dim)
+            self.slot_encoder = ElmoEncoder(elmo, args, 3*hidden_dim)
+            self.value_encoder = ElmoEncoder(elmo, args, hidden_dim)
+
+        else:
+            u_in_dim = input_user_dim
+            a_in_dim = input_action_dim
+            s_in_dim = input_user_dim
+            # self.utterance_encoder = UtteranceEncoder(u_in_dim, hidden_dim,
+            #                                           receptors)
+            n = int(u_in_dim / a_in_dim)
+            self.utt_enc = MultiScaleReceptorsModule(a_in_dim, hidden_dim,
+                                                     receptors, n)
+            self.action_encoder = ActionEncoder(a_in_dim, hidden_dim)
+            self.slot_encoder = SlotEncoder(s_in_dim, 3*hidden_dim, embeddings, self.device)
+            self.value_encoder = ValueEncoder(hidden_dim, embeddings, self.device)
+            self.embeddings = embeddings
+            self.embeddings_len = len(embeddings.get("i"))
+
+        self.prediction_encoder = PredictionEncoder(3 * hidden_dim,
+                                                    hidden_dim, hidden_dim)
+        self.slot_fill_indicator = nn.Linear(hidden_dim, 1)
         self.optimizer = None
+        self.epochs_trained = 0
+        self.logger = self.get_train_logger()
+
 
     def set_epochs_trained(self, e):
         self.epochs_trained = e
@@ -302,9 +343,11 @@ class StateNet(nn.Module):
 
     # @property
     def get_device(self):
-         if self.args.gpu is not None and torch.cuda.is_available():
-            return torch.device('cuda')
-         else:
+        if self.args.gpu is not None and torch.cuda.is_available():
+            num_gpus = torch.cuda.device_count()
+            gpu = self.args.gpu % num_gpus
+            return torch.device('cuda:{}'.format(gpu))
+        else:
             return torch.device('cpu')
 
     def embed(self, w, numpy=False):
@@ -339,34 +382,44 @@ class StateNet(nn.Module):
         binary_filling_probs = {}
 
         # Encode user and action representations offline
-        #fu = self.utterance_encoder(turn.user_utt)  # user input encoding
-        utt = [t.to(self.device) for t in turn.user_utt]
-        act = turn.system_act.to(self.device)
-        sys = [t.to(self.device) for t in turn.system_utt]
-        fu = self.utt_enc(utt)  # user input encoding
-        fa = self.action_encoder(act)  # action input encoding
-        #fy = self.utterance_encoder(turn.system_utt)
-        fy = self.utt_enc(sys)
+        if self.args.elmo:
+            fu = self.utt_enc([turn.user_utt])
+            flat_act = [item for sublist in turn.system_act for item in sublist]
+            fa = self.action_encoder(flat_act)
+            fy = self.utt_enc([turn.system_utt])
+        else:
+            utt = [t.to(self.device) for t in turn.x_utt]
+            act = turn.x_act.to(self.device)
+            sys = [t.to(self.device) for t in turn.x_sys]
+
+            # fu = self.utterance_encoder(turn.user_utt)  # user input encoding
+            fu = self.utt_enc(utt)  # user input encoding
+            fa = self.action_encoder(act)  # action input encodingdebug
+            # fy = self.utterance_encoder(turn.system_utt)
+            fy = self.utt_enc(sys)
 
         loss_updates = torch.Tensor([0]).to(self.device)
 
         # iterate over slots and values, compute probabilities
         for slot in slots2values.keys():
             # compute encoding of inputs as described in StateNet paper, Sec. 2
-            fs = self.slot_encoder(slot).view(-1).to(self.device)  # slot encoding
+            if self.args.elmo:
+                fs = self.slot_encoder(slot.split("-"))
+            else:
+                fs = self.slot_encoder(slot).view(-1).to(self.device)  # slot encoding
             # i = torch.cat((fu, fa), 0)
             # i = F.mul(fs, i)
             i = F.mul(fs, torch.cat((fu, fa, fy), 0))  # inputs encoding
             o, hidden = self.prediction_encoder(i, hidden)
 
             # get binary prediction for slot presence
-            binary_filling_probs[slot] = F.sigmoid(self.slot_fill_indicator(o))
+            binary_filling_probs[slot] = torch.sigmoid(self.slot_fill_indicator(o))
 
             # get probability distribution over values...
             values = slots2values[slot]
-            probs[slot] = torch.zeros(len(values))
 
             if binary_filling_probs[slot] > 0.5:
+                probs[slot] = torch.zeros(len(values))
                 for v, value in enumerate(values):
                     venc = self.value_encoder(value).to(self.device)
                     # ... by computing 2-Norm distance following paper, Sec. 2.6
@@ -388,7 +441,8 @@ class StateNet(nn.Module):
 
         loss = loss / loss_updates
 
-        return loss, probs, hidden
+        mean_slots_filled = len(probs) / len(slots2values)
+        return loss, probs, hidden, mean_slots_filled
 
     def forward(self, dialog, slots2values):
         """
@@ -400,22 +454,23 @@ class StateNet(nn.Module):
         hidden = torch.zeros(1, 1, self.hidden_dim).to(self.device)
         global_probs = {}
         global_loss = torch.Tensor([0]).to(self.device)
-
+        per_turn_mean_slots_filled = []
         ys_turn = []
 
         for turn in dialog.turns:
-            loss, turn_probs, hidden = self.forward_turn(turn, slots2values,
+            loss, turn_probs, hidden, mean_slots_filled = self.forward_turn(turn, slots2values,
                                                          hidden)
+            per_turn_mean_slots_filled.append(mean_slots_filled)
             global_loss += loss
             turn_preds = {}
             for slot, values in slots2values.items():
-                global_probs[slot] = torch.zeros(len(values))
-                turn_preds[slot] = np.argmax(turn_probs[slot].detach().numpy()
-                                             , 0)
-
-                for v, value in enumerate(values):
-                    global_probs[slot][v] = max(global_probs[slot][v],
-                                                turn_probs[slot][v])
+                if slot in turn_probs:
+                    global_probs[slot] = torch.zeros(len(values))
+                    turn_preds[slot] = np.argmax(
+                        turn_probs[slot].detach().numpy() , 0)
+                    for v, value in enumerate(values):
+                        global_probs[slot][v] = max(global_probs[slot][v],
+                                                    turn_probs[slot][v])
 
             ys_turn.append(turn_preds)
 
@@ -426,16 +481,18 @@ class StateNet(nn.Module):
             ys[slot] = int(argmax)
 
         global_loss = global_loss / len(dialog.turns)
-        return ys, ys_turn, global_loss
+        dialog_mean_slots_filled = np.mean(per_turn_mean_slots_filled)
+        return ys, ys_turn, global_loss, dialog_mean_slots_filled
 
     def run_train(self, dialogs_train, dialogs_dev, s2v, args):
         track = defaultdict(list)
-        logger = self.get_train_logger()
         if self.optimizer is None:
             self.set_optimizer()
+        self.logger.info("Starting training...")
         best = {}
         iteration = 0
         for epoch in range(1, args.epochs+1):
+            global_mean_slots_filled = []
             # logger.info('starting epoch {}'.format(epoch))
 
             if not hasattr(self, "epochs_trained"):
@@ -447,7 +504,10 @@ class StateNet(nn.Module):
             for dialog in tqdm(dialogs_train):
                 iteration += 1
                 self.zero_grad()
-                predictions, turn_predictions, loss = self.forward(dialog, s2v)
+                predictions, turn_predictions, loss, mean_slots_filled = \
+                    self.forward(dialog, s2v)
+                # print(turn_predictions)
+                global_mean_slots_filled.append(mean_slots_filled)
                 loss.backward()
                 self.optimizer.step()
                 track['loss'].append(loss.item())
@@ -461,7 +521,11 @@ class StateNet(nn.Module):
             summary.update({'eval_dev_{}'.format(k):v for k, v in
                             self.run_eval(dialogs_dev, s2v, args).items()})
 
+            global_mean_slots_filled = np.mean(global_mean_slots_filled)
             print(summary)
+            print("Predicted {}% slots as present".format(global_mean_slots_filled*100))
+            self.logger.info("Predicted {}% slots as present".format(global_mean_slots_filled*100))
+            self.logger.info("Epoch summary: " + str(summary))
 
             # do early stopping saves
             stop_key = 'eval_dev_{}'.format(args.stop)
@@ -484,15 +548,15 @@ class StateNet(nn.Module):
                 #     preds=self.run_pred(dialogs_dev, s2v, self.args),
                 #     to_file=os.path.join(self.args.dout, 'dev.pred.json'),
                 # )
-            summary.update({'best_{}'.format(k):v for k, v in best.items()})
-            logger.info(pformat(summary))
+            summary.update({'best_{}'.format(k): v for k, v in best.items()})
+            self.logger.info(pformat(summary))
             track.clear()
 
     def run_pred(self, dialogs, s2v, args):
         self.eval()
         predictions = []
         for d in dialogs:
-            predictions_d, turn_predictions, _ = self.forward(d, s2v)
+            predictions_d, turn_predictions, _, _ = self.forward(d, s2v)
             predictions.append((predictions_d, turn_predictions))
         return predictions
 
@@ -554,3 +618,10 @@ class StateNet(nn.Module):
         scores.sort(key=lambda tup:tup[0], reverse=True)
         return scores
 
+    def get_train_logger(self):
+        logger = logging.getLogger('train-{}'.format(self.__class__.__name__))
+        formatter = logging.Formatter('%(asctime)s [%(threadName)-12.12s] [%(levelname)-5.5s]  %(message)s')
+        file_handler = logging.FileHandler(os.path.join(self.args.dout, 'train.log'))
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+        return logger
