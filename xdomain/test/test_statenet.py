@@ -129,23 +129,14 @@ def run(args):
     data_dv = list(data_dv.iter_dialogs())
     random.shuffle(data_tr)
 
-    for i, d in enumerate(data_tr):
-        if i == args.debug_data_amount:
-            break
-        _data_tr.append(d)
-
-    for i, d in enumerate(data_dv):
-        if i == args.debug_data_amount:
-            break
-        _data_dv.append(d)
-
     data_dv = _data_dv
     data_tr = _data_tr
 
     s2v = fix_s2v(s2v, data_tr + data_dv)
 
     print("Featurizing...")
-    data_f_tr = featurize_dialogs(data_tr, domains, strict)
+    data_f_tr = featurize_dialogs(data_tr, domains, strict,
+                                  args.max_train_dialogs)
     data_f_dv = featurize_dialogs(data_dv, domains, strict,
                                   args.max_dev_dialogs)
     # print(data_tr[0].to_dict()['turns'][0]['system_acts'])
@@ -188,8 +179,8 @@ def get_args():
     parser.add_argument('--eta', help='factor for loss for binary slot filling prediction', default=0.5, type=float)
     parser.add_argument('--path', help='path to data files',
                         default='../data/multiwoz/ann/')
-    parser.add_argument('--debug_data_amount', default=-1, type=int)
     parser.add_argument('--max_dialog_length', default=-1, type=int)
+    parser.add_argument('--max_train_dialogs', default=-1, type=int)
     parser.add_argument('--max_dev_dialogs', default=-1, type=int)
     parser.add_argument('--elmo', action='store_true', help="If True, use ELMo for embedding")
     parser.add_argument('--elmo_weights', default='res/elmo/elmo_2x1024_128_2048cnn_1xhighway_weights.hdf5')
