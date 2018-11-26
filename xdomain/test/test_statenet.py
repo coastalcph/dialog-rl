@@ -122,15 +122,9 @@ def run(args):
     data_tr = data['train']
     s2v = ontology.values
 
-    _data_tr = []
-    _data_dv = []
-
     data_tr = list(data_tr.iter_dialogs())
     data_dv = list(data_dv.iter_dialogs())
     random.shuffle(data_tr)
-
-    data_dv = _data_dv
-    data_tr = _data_tr
 
     s2v = fix_s2v(s2v, data_tr + data_dv)
 
@@ -139,7 +133,7 @@ def run(args):
                                   args.max_train_dialogs)
     data_f_dv = featurize_dialogs(data_dv, domains, strict,
                                   args.max_dev_dialogs)
-    # print(data_tr[0].to_dict()['turns'][0]['sy'])
+    # print(data_tr[0].to_dict()['turns'][0]['system_acts'])
 
     model = util.load_model(DIM_INPUT * M, DIM_INPUT, DIM_HIDDEN_ENC,
                             N_RECEPTORS, w2v, args)
