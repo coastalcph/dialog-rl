@@ -88,7 +88,7 @@ def run(args):
                         continue
                 # else, check there's at least one valid domain in the dialog
                 else:
-                    if allowed_domains.intersection(dialog_domains):
+                    if not allowed_domains.intersection(dialog_domains):
                         continue
 
             for t in dg['turns']:
