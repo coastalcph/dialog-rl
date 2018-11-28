@@ -14,10 +14,17 @@ from collections import defaultdict
 from pprint import pformat
 from eval import evaluate_preds
 from allennlp.commands.elmo import ElmoEmbedder
+from collections import namedtuple
 
 # TODO refactor such that encoder classes are declared within StateNet, allows
 # for better modularization and sharing of instances/variables such as
 # embeddings
+
+Turn = namedtuple("Turn", ["user_utt", "system_act", "system_utt",
+                           "x_utt", "x_act", "x_sys", "labels", "belief_state"])
+Dialog = namedtuple("Dialog", ["turns"])
+Slot = namedtuple("Slot", ["domain", "embedding", "values"])
+Value = namedtuple("Value", ["value", "embedding", "idx"])
 
 
 class ElmoEncoder(nn.Module):
@@ -153,37 +160,23 @@ class SlotEncoder(nn.Module):
 
     """
 
-    def __init__(self, in_dim, out_dim, embeddings, device):
+    def __init__(self, in_dim, out_dim, device):
         """
 
         :param in_dim:
         :param out_dim:
         """
         super().__init__()
-        self.embeddings = embeddings
-        self.embeddings_len = len(embeddings.get("i"))
-        self.linear = nn.Linear(self.embeddings_len, out_dim)
+        self.linear = nn.Linear(in_dim, out_dim)
         self.device = device
 
-    def forward(self, slot):
+    def forward(self, slot_embedding):
         """
 
-        :param slot:
+        :param slot_embedding: Vector representation of slot
         :return:
         """
-        # remove domain prefix ('restaurant-priceRange' -> 'priceRange')
-        domain, slot = slot.split("-", 1)
-        # split at uppercase to get vectors ('priceRange' -> ['price', 'range'])
-        words = util.split_on_uppercase(slot, keep_contiguous=True)
-        vecs = [self.embeddings.get(w.lower()) for w in words]
-        if not vecs:
-            vecs = [[0 for _ in range(len(self.embeddings.get("i")))]]
-
-        sv = torch.Tensor(vecs).to(self.device)
-        sv, _ = torch.max(sv, 0)
-        # print(domain, slot, words, len(vecs), sv.shape)
-
-        return F.relu(self.linear(sv))
+        return F.relu(self.linear(slot_embedding)).view(-1).to(self.device)
 
 
 class PredictionEncoder(nn.Module):
@@ -225,29 +218,23 @@ class ValueEncoder(nn.Module):
     """
 
     """
-    def __init__(self, out_dim, embeddings, device):
+    def __init__(self, in_dim, out_dim, device):
         """
 
         :param in_dim:
         :param out_dim:
         """
         super().__init__()
-        self.embeddings = embeddings
-        self.embeddings_len = len(embeddings.get("i"))
-        self.linear = nn.Linear(self.embeddings_len, out_dim)
+        self.linear = nn.Linear(in_dim, out_dim)
         self.device = device
 
-    def forward(self, slot):
+    def forward(self, value_embedding):
         """
 
-        :param slot:
+        :param value_embedding:
         :return:
         """
-        v = self.embeddings.get(slot)
-        if not v:
-            v = torch.zeros(len(self.embeddings.get("i")))
-        v = torch.Tensor(v).to(self.device)
-        return F.relu(self.linear(v))
+        return F.relu(self.linear(value_embedding)).to(self.device)
 
 
 class StateNet(nn.Module):
@@ -271,15 +258,15 @@ class StateNet(nn.Module):
 
     """
 
-    def __init__(self, input_user_dim, input_action_dim, hidden_dim, receptors,
-                 embeddings, args):
+    def __init__(self, input_user_dim, input_action_dim, input_slot_dim,
+                 input_value_dim, hidden_dim, receptors,
+                 args):
         """
 
         :param input_user_dim: dimensionality of user input embeddings
         :param input_action_dim: dimensionality of action embeddings
         :param hidden_dim:
         :param receptors:
-        :param embeddings:
         """
         super().__init__()
 
@@ -311,10 +298,10 @@ class StateNet(nn.Module):
             self.utt_enc = MultiScaleReceptorsModule(a_in_dim, hidden_dim,
                                                      receptors, n)
             self.action_encoder = ActionEncoder(a_in_dim, hidden_dim)
-            self.slot_encoder = SlotEncoder(s_in_dim, 3*hidden_dim, embeddings, self.device)
-            self.value_encoder = ValueEncoder(hidden_dim, embeddings, self.device)
-            self.embeddings = embeddings
-            self.embeddings_len = len(embeddings.get("i"))
+            self.slot_encoder = SlotEncoder(input_slot_dim, 3*hidden_dim,
+                                            self.device)
+            self.value_encoder = ValueEncoder(input_value_dim, hidden_dim,
+                                              self.device)
 
         self.prediction_encoder = PredictionEncoder(3 * hidden_dim,
                                                     hidden_dim, hidden_dim)
@@ -400,42 +387,42 @@ class StateNet(nn.Module):
         loss_updates = torch.Tensor([0]).to(self.device)
 
         # iterate over slots and values, compute probabilities
-        for slot in slots2values.keys():
+        for slot_id, slot in slots2values.items():
             # compute encoding of inputs as described in StateNet paper, Sec. 2
             if self.args.elmo:
-                fs = self.slot_encoder(slot.split("-"))
+                fs = self.slot_encoder(slot_id.split("-"))
             else:
-                fs = self.slot_encoder(slot).view(-1).to(self.device)  # slot encoding
+                fs = self.slot_encoder(slot.embedding)
             # i = torch.cat((fu, fa), 0)
             # i = F.mul(fs, i)
             i = F.mul(fs, torch.cat((fu, fa, fy), 0))  # inputs encoding
             o, hidden = self.prediction_encoder(i, hidden)
 
             # get binary prediction for slot presence
-            binary_filling_probs[slot] = torch.sigmoid(self.slot_fill_indicator(o))
+            binary_filling_probs[slot_id] = torch.sigmoid(self.slot_fill_indicator(o))
 
             # get probability distribution over values...
-            values = slots2values[slot]
+            values = slot.values
 
-            if binary_filling_probs[slot] > 0.5:
-                probs[slot] = torch.zeros(len(values))
+            if binary_filling_probs[slot_id] > 0.5:
+                probs[slot_id] = torch.zeros(len(values))
                 for v, value in enumerate(values):
-                    venc = self.value_encoder(value).to(self.device)
+                    venc = self.value_encoder(value.embedding)
                     # ... by computing 2-Norm distance following paper, Sec. 2.6
-                    probs[slot][v] = -torch.dist(o, venc)
-                probs[slot] = F.softmax(probs[slot], 0)  # softmax it!
+                    probs[slot_id][v] = -torch.dist(o, venc)
+                probs[slot_id] = F.softmax(probs[slot_id], 0)  # softmax it!
 
         loss = torch.Tensor([0]).to(self.device)
         if self.training:
-            for slot in slots2values.keys():
+            for slot_id in slots2values.keys():
                 # 1 if slot in turn.labels (meaning it's filled), 0 else
-                gold_slot_filling = torch.tensor(float(slot in turn.labels)).to(self.device)
+                gold_slot_filling = torch.tensor(float(slot_id in turn.labels)).to(self.device)
                 loss += self.args.eta * F.binary_cross_entropy(
-                    binary_filling_probs[slot],
+                    binary_filling_probs[slot_id],
                     gold_slot_filling).to(self.device)
                 loss_updates += 1
-                if slot in turn.labels and binary_filling_probs[slot] > 0.5:
-                    loss += F.binary_cross_entropy(probs[slot], turn.labels[slot]).to(self.device)
+                if slot_id in turn.labels and binary_filling_probs[slot_id] > 0.5:
+                    loss += F.binary_cross_entropy(probs[slot_id], turn.labels[slot_id]).to(self.device)
                     loss_updates += 1
 
         loss = loss / loss_updates
@@ -488,6 +475,7 @@ class StateNet(nn.Module):
         if self.optimizer is None:
             self.set_optimizer()
         self.logger.info("Starting training...")
+        s2v = self.s2v_to_device(s2v)
         best = {}
         iteration = 0
         for epoch in range(1, args.epochs+1):
@@ -617,10 +605,14 @@ class StateNet(nn.Module):
         scores.sort(key=lambda tup:tup[0], reverse=True)
         return scores
 
-    def get_train_logger(self):
-        logger = logging.getLogger('train-{}'.format(self.__class__.__name__))
-        formatter = logging.Formatter('%(asctime)s [%(threadName)-12.12s] [%(levelname)-5.5s]  %(message)s')
-        file_handler = logging.FileHandler(os.path.join(self.args.dout, 'train.log'))
-        file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
-        return logger
+    def s2v_to_device(self, s2v):
+        s2v_new = {}
+        for slot_name, slot in s2v.items():
+            slot_emb = torch.Tensor(slot.embedding).to(self.device)
+            vals_new = []
+            for val in slot.values:
+                val_emb = torch.Tensor(val.embedding).to(self.device)
+                vals_new.append(Value(val.value, val_emb, val.idx))
+            s2v_new[slot_name] = Slot(slot.domain, slot_emb, vals_new)
+        return s2v_new
+
