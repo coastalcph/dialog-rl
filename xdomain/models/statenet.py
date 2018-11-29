@@ -564,7 +564,8 @@ class StateNet(nn.Module):
 
     def run_eval(self, dialogs, s2v):
         predictions, turn_predictions = zip(*self.run_pred(dialogs, s2v))
-        return evaluate_preds(dialogs, predictions, turn_predictions)
+        return evaluate_preds(dialogs, predictions, turn_predictions,
+                              self.args.dout+"/prediction.json")
 
     def save(self, summary, identifier):
         fname = '{}/{}.t7'.format(self.args.dout, identifier)
