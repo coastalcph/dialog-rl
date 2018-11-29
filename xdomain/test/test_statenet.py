@@ -11,10 +11,8 @@ import argparse
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 
 DIM_INPUT = 400
-M = 2
 DIM_HIDDEN_LSTM = 128
 DIM_HIDDEN_ENC = 128
-N_RECEPTORS = 2
 
 
 def delexicalize(s2v):
@@ -73,7 +71,7 @@ def featurize_s2v(s2v_dict, w2v):
     return out
 
 
-def featurize_dialogs(_data, _domains, _strict, s2v, w2v, max_dialogs=-1):
+def featurize_dialogs(_data, _domains, _strict, s2v, w2v, max_dialogs=-1, M=3):
     featurized_dialogs = []
 
     def get_value_index(_values, _val):
@@ -168,13 +166,13 @@ def run(args):
 
     print("Featurizing...")
     data_f_tr = featurize_dialogs(data_tr, domains, strict, s2v, w2v,
-                                  args.max_train_dialogs)
+                                  args.max_train_dialogs, M=args.M)
     data_f_dv = featurize_dialogs(data_dv, domains, strict, s2v, w2v,
-                                  args.max_dev_dialogs)
+                                  args.max_dev_dialogs, M=args.M)
     # print(data_tr[0].to_dict()['turns'][0]['system_acts'])
 
-    model = util.load_model(DIM_INPUT * M, DIM_INPUT, DIM_INPUT, DIM_INPUT,
-                            DIM_HIDDEN_ENC, N_RECEPTORS, args)
+    model = util.load_model(DIM_INPUT * args.M, DIM_INPUT, DIM_INPUT, DIM_INPUT,
+                            DIM_HIDDEN_ENC, args.receptors, args)
     if args.resume:
         model.load_best_save(directory=args.resume)
 
@@ -224,6 +222,9 @@ def get_args():
     parser.add_argument('--encode_sys_utt', action='store_true',
                         help="If set, uses system utterance too, instead of "
                              "just system act representation")
+    parser.add_argument('--receptors', default=3, help='number of receptors per '
+                                                       'n-gram', type=int)
+    parser.add_argument('--M', default=3, help='max n-gram size', type=int)
 
     args = parser.parse_args()
     args.dout = os.path.join(args.dexp, args.model, args.nick)
