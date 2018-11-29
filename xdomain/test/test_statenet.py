@@ -42,7 +42,6 @@ def fix_s2v(_s2v, dialogs):
     all_slots = set()
     s2v_new = {}
     for d in dialogs:
-        d = d.to_dict()
         for t in d['turns']:
             for s, v in t['turn_label']:
                 all_slots.add(s)
@@ -71,7 +70,36 @@ def featurize_s2v(s2v_dict, w2v):
     return out
 
 
-def featurize_dialogs(_data, _domains, _strict, s2v, w2v, max_dialogs=-1, M=3):
+def filter_dialogs(data, domains, strict, max_dialogs, max_turns_per_dialog):
+    out = []
+    for dg in data:
+        if len(dg['turns']) > max_turns_per_dialog > 0:
+            continue
+
+        # # # Check domain constraints # # #
+        # if 'all' in domains, don't worry about anything, else
+        # check how allowed domains and dialog domain intersect
+        if 'all' not in domains:
+            dialog_domains = set(dg['domain'])
+            allowed_domains = set(domains)
+
+            # strictly restricted to some domain(s), check that
+            # dialog has no other domains
+            if strict:
+                if not allowed_domains.issuperset(dialog_domains):
+                    continue
+            # else, check there's at least one valid domain in the dialog
+            else:
+                if not allowed_domains.intersection(dialog_domains):
+                    continue
+        out.append(dg)
+
+    if max_dialogs > 0:
+        out = out[:max_dialogs]
+    return out
+
+
+def featurize_dialogs(_data, _domains, _strict, s2v, w2v, M=3):
     featurized_dialogs = []
 
     def get_value_index(_values, _val):
@@ -86,27 +114,6 @@ def featurize_dialogs(_data, _domains, _strict, s2v, w2v, max_dialogs=-1, M=3):
 
     for dg in tqdm(_data):
         featurized_turns = []
-        dg = dg.to_dict()
-
-        if len(dg['turns']) > args.max_dialog_length > 0:
-            continue
-
-        # # # Check domain constraints # # #
-        # if 'all' in domains, don't worry about anything, else
-        # check how allowed domains and dialog domain intersect
-        if 'all' not in _domains:
-            dialog_domains = set(dg['domain'])
-            allowed_domains = set(_domains)
-
-            # strictly restricted to some domain(s), check that
-            # dialog has no other domains
-            if _strict:
-                if not allowed_domains.issuperset(dialog_domains):
-                    continue
-            # else, check there's at least one valid domain in the dialog
-            else:
-                if not allowed_domains.intersection(dialog_domains):
-                    continue
 
         for t in dg['turns']:
             utt = t['transcript']
@@ -130,10 +137,6 @@ def featurize_dialogs(_data, _domains, _strict, s2v, w2v, max_dialogs=-1, M=3):
                                          ys, bst))
         featurized_dialogs.append(Dialog(featurized_turns))
 
-    if max_dialogs > 0:
-        featurized_dialogs = featurized_dialogs[:max_dialogs]
-
-    print('length of featurized dialogs: ', len(featurized_dialogs))
     return featurized_dialogs
 
 
@@ -157,18 +160,24 @@ def run(args):
     if args.delexicalize_labels:
         s2v = delexicalize(s2v)
 
-    data_tr = list(data_tr.iter_dialogs())
-    data_dv = list(data_dv.iter_dialogs())
+    data_tr = [dg.to_dict() for dg in data_tr.iter_dialogs()]
+    data_dv = [dg.to_dict() for dg in data_dv.iter_dialogs()]
     random.shuffle(data_tr)
 
+    data_tr = filter_dialogs(data_tr, domains, strict, args.max_train_dialogs,
+                             args.max_dialog_length)
+    data_dv = filter_dialogs(data_dv, domains, strict, args.max_train_dialogs,
+                             args.max_dialog_length)
+
+    print(len(s2v))
     s2v = fix_s2v(s2v, data_tr + data_dv)
+    print(s2v, len(s2v))
+
     s2v = featurize_s2v(s2v, w2v)
 
     print("Featurizing...")
-    data_f_tr = featurize_dialogs(data_tr, domains, strict, s2v, w2v,
-                                  args.max_train_dialogs, M=args.M)
-    data_f_dv = featurize_dialogs(data_dv, domains, strict, s2v, w2v,
-                                  args.max_dev_dialogs, M=args.M)
+    data_f_tr = featurize_dialogs(data_tr, domains, strict, s2v, w2v, M=args.M)
+    data_f_dv = featurize_dialogs(data_dv, domains, strict, s2v, w2v, M=args.M)
     # print(data_tr[0].to_dict()['turns'][0]['system_acts'])
 
     model = util.load_model(DIM_INPUT * args.M, DIM_INPUT, DIM_INPUT, DIM_INPUT,
