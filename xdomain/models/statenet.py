@@ -274,6 +274,11 @@ class StateNet(nn.Module):
         self.args = args
         self.device = self.get_device()
 
+        if args.encode_sys_utt:
+            slot_hidden_dim = 3 * hidden_dim
+        else:
+            slot_hidden_dim = 2 * hidden_dim
+
         if args.elmo:
             if args.gpu:
                 elmo = ElmoEmbedder(weight_file=args.elmo_weights,
@@ -285,7 +290,7 @@ class StateNet(nn.Module):
 
             self.utt_enc = ElmoEncoder(elmo, args, hidden_dim)
             self.action_encoder = ElmoEncoder(elmo, args, hidden_dim)
-            self.slot_encoder = ElmoEncoder(elmo, args, 3*hidden_dim)
+            self.slot_encoder = ElmoEncoder(elmo, args, slot_hidden_dim)
             self.value_encoder = ElmoEncoder(elmo, args, hidden_dim)
 
         else:
@@ -298,17 +303,18 @@ class StateNet(nn.Module):
             self.utt_enc = MultiScaleReceptorsModule(a_in_dim, hidden_dim,
                                                      receptors, n)
             self.action_encoder = ActionEncoder(a_in_dim, hidden_dim)
-            self.slot_encoder = SlotEncoder(input_slot_dim, 3*hidden_dim,
+            self.slot_encoder = SlotEncoder(input_slot_dim, slot_hidden_dim,
                                             self.device)
             self.value_encoder = ValueEncoder(input_value_dim, hidden_dim,
                                               self.device)
 
-        self.prediction_encoder = PredictionEncoder(3 * hidden_dim,
+        self.prediction_encoder = PredictionEncoder(slot_hidden_dim,
                                                     hidden_dim, hidden_dim)
         self.slot_fill_indicator = nn.Linear(hidden_dim, 1)
         self.optimizer = None
         self.epochs_trained = 0
         self.logger = self.get_train_logger()
+        self.logger.setLevel(logging.INFO)
 
     def set_epochs_trained(self, e):
         self.epochs_trained = e
@@ -372,17 +378,19 @@ class StateNet(nn.Module):
             fu = self.utt_enc([turn.user_utt])
             flat_act = [item for sublist in turn.system_act for item in sublist]
             fa = self.action_encoder(flat_act)
-            fy = self.utt_enc([turn.system_utt])
+            fy = None
+            if self.args.encode_sys_utt:
+                fy = self.utt_enc([turn.system_utt])
         else:
-            utt = [t.to(self.device) for t in turn.x_utt]
+            utt = [t.to(self.device) for t in turn.x_utt]  # one vector per n
             act = turn.x_act.to(self.device)
-            sys = [t.to(self.device) for t in turn.x_sys]
+            sys = [t.to(self.device) for t in turn.x_sys]  # one vector per n
 
-            # fu = self.utterance_encoder(turn.user_utt)  # user input encoding
             fu = self.utt_enc(utt)  # user input encoding
             fa = self.action_encoder(act)  # action input encodingdebug
-            # fy = self.utterance_encoder(turn.system_utt)
-            fy = self.utt_enc(sys)
+            fy = None
+            if self.args.encode_sys_utt:
+                fy = self.utt_enc(sys)
 
         loss_updates = torch.Tensor([0]).to(self.device)
 
@@ -395,7 +403,10 @@ class StateNet(nn.Module):
                 fs = self.slot_encoder(slot.embedding)
             # i = torch.cat((fu, fa), 0)
             # i = F.mul(fs, i)
-            i = F.mul(fs, torch.cat((fu, fa, fy), 0))  # inputs encoding
+            if self.args.encode_sys_utt:
+                i = F.mul(fs, torch.cat((fu, fa, fy), 0))  # inputs encoding
+            else:
+                i = F.mul(fs, torch.cat((fu, fa), 0))  # inputs encoding
             o, hidden = self.prediction_encoder(i, hidden)
 
             # get binary prediction for slot presence
@@ -416,7 +427,7 @@ class StateNet(nn.Module):
         if self.training:
             for slot_id in slots2values.keys():
                 # 1 if slot in turn.labels (meaning it's filled), 0 else
-                gold_slot_filling = torch.tensor(float(slot_id in turn.labels)).to(self.device)
+                gold_slot_filling = torch.Tensor([float(slot_id in turn.labels)]).to(self.device)
                 loss += self.args.eta * F.binary_cross_entropy(
                     binary_filling_probs[slot_id],
                     gold_slot_filling).to(self.device)
@@ -428,6 +439,7 @@ class StateNet(nn.Module):
         loss = loss / loss_updates
 
         mean_slots_filled = len(probs) / len(slots2values)
+        # print("Mean slots filled in turn", mean_slots_filled, "total absolute: ", len(probs), list(probs.keys()), turn.user_utt)
         return loss, probs, hidden, mean_slots_filled
 
     def forward(self, dialog, slots2values):
@@ -449,14 +461,14 @@ class StateNet(nn.Module):
             per_turn_mean_slots_filled.append(mean_slots_filled)
             global_loss += loss
             turn_preds = {}
-            for slot, values in slots2values.items():
-                if slot in turn_probs:
-                    global_probs[slot] = torch.zeros(len(values))
-                    turn_preds[slot] = np.argmax(
-                        turn_probs[slot].detach().numpy() , 0)
-                    for v, value in enumerate(values):
-                        global_probs[slot][v] = max(global_probs[slot][v],
-                                                    turn_probs[slot][v])
+            for slot_id, slot in slots2values.items():
+                if slot_id in turn_probs:
+                    global_probs[slot_id] = torch.zeros(len(slot.values))
+                    turn_preds[slot_id] = np.argmax(
+                        turn_probs[slot_id].detach().numpy() , 0)
+                    for v, value in enumerate(slot.values):
+                        global_probs[slot_id][v] = max(global_probs[slot_id][v],
+                                                    turn_probs[slot_id][v])
 
             ys_turn.append(turn_preds)
 
@@ -488,11 +500,13 @@ class StateNet(nn.Module):
 
             # train and update parameters
             self.train()
+            train_predictions = []
             for dialog in tqdm(dialogs_train):
                 iteration += 1
                 self.zero_grad()
                 predictions, turn_predictions, loss, mean_slots_filled = \
                     self.forward(dialog, s2v)
+                train_predictions.append((predictions, turn_predictions))
                 # print(turn_predictions)
                 global_mean_slots_filled.append(mean_slots_filled)
                 loss.backward()
@@ -503,14 +517,15 @@ class StateNet(nn.Module):
             summary = {'iteration': iteration, 'epoch': self.epochs_trained}
             for k, v in track.items():
                 summary[k] = sum(v) / len(v)
+            self.logger.info("Evaluating...")
+            predictions, turn_predictions = zip(*train_predictions)
             summary.update({'eval_train_{}'.format(k):v for k, v in
-                            self.run_eval(dialogs_train, s2v, args).items()})
+                            evaluate_preds(dialogs_train, predictions,
+                                           turn_predictions).items()})
             summary.update({'eval_dev_{}'.format(k):v for k, v in
-                            self.run_eval(dialogs_dev, s2v, args).items()})
+                            self.run_eval(dialogs_dev, s2v).items()})
 
             global_mean_slots_filled = np.mean(global_mean_slots_filled)
-            print(summary)
-            print("Predicted {}% slots as present".format(global_mean_slots_filled*100))
             self.logger.info("Predicted {}% slots as present".format(global_mean_slots_filled*100))
             self.logger.info("Epoch summary: " + str(summary))
 
@@ -539,16 +554,16 @@ class StateNet(nn.Module):
             self.logger.info(pformat(summary))
             track.clear()
 
-    def run_pred(self, dialogs, s2v, args):
+    def run_pred(self, dialogs, s2v):
         self.eval()
         predictions = []
-        for d in dialogs:
+        for d in tqdm(dialogs):
             predictions_d, turn_predictions, _, _ = self.forward(d, s2v)
             predictions.append((predictions_d, turn_predictions))
         return predictions
 
-    def run_eval(self, dialogs, s2v, args):
-        predictions, turn_predictions = zip(*self.run_pred(dialogs, s2v, args))
+    def run_eval(self, dialogs, s2v):
+        predictions, turn_predictions = zip(*self.run_pred(dialogs, s2v))
         return evaluate_preds(dialogs, predictions, turn_predictions)
 
     def save(self, summary, identifier):
@@ -571,7 +586,7 @@ class StateNet(nn.Module):
         self.optimizer.load_state_dict(state['optimizer'])
         resume_from_epoch = state.get('epoch', 0)
         self.set_epochs_trained(resume_from_epoch)
-        print("Resuming from epoch {}".format(resume_from_epoch))
+        self.logger.info("Resuming from epoch {}".format(resume_from_epoch))
 
     def prune_saves(self, n_keep=5):
             scores_and_files = self.get_saves()

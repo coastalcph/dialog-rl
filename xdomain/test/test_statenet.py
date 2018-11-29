@@ -17,6 +17,19 @@ DIM_HIDDEN_ENC = 128
 N_RECEPTORS = 2
 
 
+def delexicalize(s2v):
+    slots = ["hotel-reference", "restaurant-reference", "restaurant-time",
+             "taxi-arriveBy", "taxi-leaveAt", "taxi-phone",
+             "train-arriveBy", "train-leaveAt", "train-reference",
+             "train-trainID"]
+    out = {}
+    for s, v in s2v.items():
+        if s in slots:
+            out[s] = ["<true>"]
+        else:
+            out[s] = v
+    return out
+
 
 def str2bool(v):
     if v.lower() in ('yes', 'true', 't', 'y', '1'):
@@ -143,6 +156,8 @@ def run(args):
     data_dv = data['dev']
     data_tr = data['train']
     s2v = ontology.values
+    if args.delexicalize_labels:
+        s2v = delexicalize(s2v)
 
     data_tr = list(data_tr.iter_dialogs())
     data_dv = list(data_dv.iter_dialogs())
@@ -199,11 +214,16 @@ def get_args():
     parser.add_argument('--max_dialog_length', default=-1, type=int)
     parser.add_argument('--max_train_dialogs', default=-1, type=int)
     parser.add_argument('--max_dev_dialogs', default=-1, type=int)
-    parser.add_argument('--elmo', action='store_true', help="If True, use ELMo for embedding")
+    parser.add_argument('--elmo', action='store_true', help="If set, use ELMo for encoding inputs")
     parser.add_argument('--elmo_weights', default='res/elmo/elmo_2x1024_128_2048cnn_1xhighway_weights.hdf5')
     parser.add_argument('--elmo_options',
                         default='res/elmo/elmo_2x1024_128_2048cnn_1xhighway_options.json')
-
+    parser.add_argument('--delexicalize_labels', action='store_true',
+                        help="If set, replaces labels with dummy for select "
+                             "slots")
+    parser.add_argument('--encode_sys_utt', action='store_true',
+                        help="If set, uses system utterance too, instead of "
+                             "just system act representation")
 
     args = parser.parse_args()
     args.dout = os.path.join(args.dexp, args.model, args.nick)
