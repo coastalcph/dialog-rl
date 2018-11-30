@@ -33,9 +33,9 @@ def evaluate_preds(dialogs, preds, turn_predictions, write_out=None):
             turn_out["gold"] = turn_gold
             turn_out["pred"] = pred_inform
 
-            print("GOLD INFORM", gold_inform)
-            print("PRED INFORM", pred_inform)
-            print("=======================")
+            # print("GOLD INFORM", gold_inform)
+            # print("PRED INFORM", pred_inform)
+            # print("=======================")
             for s, v in gold_inform.items():
                 s_in_pred_inform = s in pred_inform
                 binary_slot_recall.append(s_in_pred_inform)

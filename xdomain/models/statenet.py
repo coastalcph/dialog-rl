@@ -434,7 +434,10 @@ class StateNet(nn.Module):
                     gold_slot_filling).to(self.device)
                 loss_updates += 1
                 if slot_id in turn.labels and binary_filling_probs[slot_id] > 0.5:
-                    loss += F.binary_cross_entropy(probs[slot_id], turn.labels[slot_id]).to(self.device)
+                    loss += F.binary_cross_entropy(
+                        probs[slot_id],
+                        turn.labels[slot_id]
+                    ).to(self.device)
                     loss_updates += 1
 
         loss = loss / loss_updates
@@ -464,7 +467,8 @@ class StateNet(nn.Module):
                 if slot_id in turn_probs:
                     global_probs[slot_id] = torch.zeros(len(slot.values))
                     argmax = np.argmax(turn_probs[slot_id].detach().numpy(), 0)
-                    turn_preds[slot_id] = slots2values[slot_id].values[int(argmax)].value
+                    turn_preds[slot_id] = slots2values[slot_id].values[
+                        int(argmax)].value
                     for v, value in enumerate(slot.values):
                         global_probs[slot_id][v] = max(global_probs[slot_id][v],
                                                        turn_probs[slot_id][v])
