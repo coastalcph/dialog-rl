@@ -21,7 +21,8 @@ from collections import namedtuple
 # embeddings
 
 Turn = namedtuple("Turn", ["user_utt", "system_act", "system_utt",
-                           "x_utt", "x_act", "x_sys", "labels", "belief_state"])
+                           "x_utt", "x_act", "x_sys", "labels", "labels_str",
+                           "belief_state"])
 Dialog = namedtuple("Dialog", ["turns"])
 Slot = namedtuple("Slot", ["domain", "embedding", "values"])
 Value = namedtuple("Value", ["value", "embedding", "idx"])
@@ -437,9 +438,7 @@ class StateNet(nn.Module):
                     loss_updates += 1
 
         loss = loss / loss_updates
-
         mean_slots_filled = len(probs) / len(slots2values)
-        # print("Mean slots filled in turn", mean_slots_filled, "total absolute: ", len(probs), list(probs.keys()), turn.user_utt)
         return loss, probs, hidden, mean_slots_filled
 
     def forward(self, dialog, slots2values):
@@ -456,19 +455,19 @@ class StateNet(nn.Module):
         ys_turn = []
 
         for turn in dialog.turns:
-            loss, turn_probs, hidden, mean_slots_filled = self.forward_turn(turn, slots2values,
-                                                         hidden)
+            loss, turn_probs, hidden, mean_slots_filled = \
+                self.forward_turn(turn, slots2values, hidden)
             per_turn_mean_slots_filled.append(mean_slots_filled)
             global_loss += loss
             turn_preds = {}
             for slot_id, slot in slots2values.items():
                 if slot_id in turn_probs:
                     global_probs[slot_id] = torch.zeros(len(slot.values))
-                    turn_preds[slot_id] = np.argmax(
-                        turn_probs[slot_id].detach().numpy() , 0)
+                    argmax = np.argmax(turn_probs[slot_id].detach().numpy(), 0)
+                    turn_preds[slot_id] = slots2values[slot_id].values[int(argmax)].value
                     for v, value in enumerate(slot.values):
                         global_probs[slot_id][v] = max(global_probs[slot_id][v],
-                                                    turn_probs[slot_id][v])
+                                                       turn_probs[slot_id][v])
 
             ys_turn.append(turn_preds)
 
@@ -476,10 +475,11 @@ class StateNet(nn.Module):
         ys = {}
         for slot, probs in global_probs.items():
             score, argmax = probs.max(0)
-            ys[slot] = int(argmax)
+            ys[slot] = slots2values[slot].values[int(argmax)].value
 
         global_loss = global_loss / len(dialog.turns)
         dialog_mean_slots_filled = np.mean(per_turn_mean_slots_filled)
+        print(ys, ys_turn)
         return ys, ys_turn, global_loss, dialog_mean_slots_filled
 
     def run_train(self, dialogs_train, dialogs_dev, s2v, args):

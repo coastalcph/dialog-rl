@@ -120,21 +120,29 @@ def featurize_dialogs(_data, _domains, _strict, s2v, w2v, M=3):
             sys = t['system_transcript']
             act = t['system_acts']
             bst = t['belief_state']
-            lbl = [(s, v.lower()) for s, v in t['turn_label']]
-            dom = [slot.split("-")[0] for slot, _ in lbl]
+            lbls = {}
+            for s, v in t['turn_label']:
+                v = v.lower()
+                if v in [_v.value for _v in s2v[s].values]:
+                    lbls[s] = v
+                else:
+                    lbls[s] = "<true>"
+
+            # lbl = {s: v.lower() for s, v in t['turn_label']}
+            dom = [slot.split("-")[0] for slot in lbls]
             x_utt = utt_ftz.featurize_turn(utt)
             x_act = act_ftz.featurize_turn(act)
             x_sys = sys_ftz.featurize_turn(sys)
 
             ys = {}
-            for slot, val in lbl:
+            for slot, val in lbls.items():
                 values = s2v[slot].values
                 ys[slot] = torch.zeros(len(values))
                 idx = get_value_index(values, val)
                 ys[slot][idx] = 1
             featurized_turns.append(Turn(utt, act, sys,
                                          x_utt, x_act, x_sys,
-                                         ys, bst))
+                                         ys, lbls, bst))
         featurized_dialogs.append(Dialog(featurized_turns))
 
     return featurized_dialogs

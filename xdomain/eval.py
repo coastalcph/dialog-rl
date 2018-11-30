@@ -22,14 +22,20 @@ def evaluate_preds(dialogs, preds, turn_predictions, write_out=None):
             turn_out = {"user_utt": turn.user_utt,
                         "system_act": turn.system_act,
                         "system_utt": turn.system_utt}
-            turn_gold = turn.labels
+            turn_gold = turn.labels_str
 
-            gold_inform = {s: int(np.argmax(v)) for s, v in turn_gold.items()}
-            pred_inform = {s: int(v) for s, v in turn_predictions[di][ti].items()}
+            # gold_inform = {s: int(np.argmax(v)) for s, v in turn_gold.items()}
+            # pred_inform = {s: int(v) for s, v in turn_predictions[di][ti].items()}
 
-            turn_out["gold"] = gold_inform
+            gold_inform = turn_gold
+            pred_inform = turn_predictions[di][ti]
+
+            turn_out["gold"] = turn_gold
             turn_out["pred"] = pred_inform
 
+            print("GOLD INFORM", gold_inform)
+            print("PRED INFORM", pred_inform)
+            print("=======================")
             for s, v in gold_inform.items():
                 s_in_pred_inform = s in pred_inform
                 binary_slot_recall.append(s_in_pred_inform)
@@ -56,6 +62,7 @@ def evaluate_preds(dialogs, preds, turn_predictions, write_out=None):
         dialogs_out.append(dialog_out)
 
     if f:
+        # print(dialogs_out)
         json.dump(dialogs_out, f)
         f.close()
 
