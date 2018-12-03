@@ -64,7 +64,6 @@ def evaluate_preds(dialogs, preds, turn_predictions, eval_domains=None,
             s_domain = s.split("-")[0]
             if eval_domains and s_domain not in eval_domains:
                 continue
-            print(s)
             if s in preds[di]:
                 belief_state.append(v == preds[di][s])
 

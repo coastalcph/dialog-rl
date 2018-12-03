@@ -449,7 +449,7 @@ class StateNet(nn.Module):
         if self.optimizer is None:
             self.set_optimizer()
         self.logger.info("Starting training...")
-        if torch.cuda.is_available() and 'cuda' in self.device:
+        if torch.cuda.is_available() and self.device.type == 'cuda':
             s2v = self.s2v_to_device(s2v)
         best = {}
         iteration = 0
