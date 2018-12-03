@@ -14,7 +14,7 @@ DIM_HIDDEN_ENC = 128
 
 
 def delexicalize(s2v):
-    slots = [
+    allowed_slots = [
         "attraction-area",
         "attraction-name",
         "attraction-type",
@@ -44,10 +44,10 @@ def delexicalize(s2v):
         "train-people"]
     out = {}
     for s, v in s2v.items():
-        if s not in slots:
-            out[s] = ["<true>"]
-        else:
+        if s in allowed_slots:
             out[s] = v
+        else:
+            out[s] = ["<true>"]
     return out
 
 
@@ -76,8 +76,8 @@ def fix_s2v(_s2v, dialogs):
 
 def featurize_s2v(s2v_dict, slot_featurizer, value_featurizer):
     out = {}
-
-    for s, vs in s2v_dict.items():
+    print("Featurizing slots and values...")
+    for s, vs in tqdm(s2v_dict.items()):
         # remove domain prefix ('restaurant-priceRange' -> 'priceRange')
         domain, slot = s.split("-", 1)
         # split at uppercase to get vectors ('priceRange' -> ['price', 'range'])

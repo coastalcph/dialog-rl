@@ -283,6 +283,7 @@ class StateNet(nn.Module):
         self.epochs_trained = 0
         self.logger = self.get_train_logger()
         self.logger.setLevel(logging.INFO)
+        self.logger.info(args)
 
     def set_epochs_trained(self, e):
         self.epochs_trained = e
