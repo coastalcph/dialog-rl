@@ -586,10 +586,14 @@ class StateNet(nn.Module):
     def s2v_to_device(self, s2v):
         s2v_new = {}
         for slot_name, slot in s2v.items():
-            slot_emb = torch.Tensor(slot.embedding).to(self.device)
+            slot_emb = torch.Tensor(slot.embedding)
+            if 'cuda' not in slot_emb.device.type:
+                slot_emb = slot_emb.to(self.device)
             vals_new = []
             for val in slot.values:
                 val_emb = torch.Tensor(val.embedding).to(self.device)
+                if 'cuda' not in val_emb.device.type:
+                    val_emb = val_emb.to(self.device)
                 vals_new.append(Value(val.value, val_emb, val.idx))
             s2v_new[slot_name] = Slot(slot.domain, slot_emb, vals_new)
         return s2v_new
