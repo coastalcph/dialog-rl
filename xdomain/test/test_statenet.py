@@ -225,8 +225,13 @@ def run(args):
     print(s2v, len(s2v))
 
     if args.elmo:
-        elmo = ElmoEmbedder(weight_file=args.elmo_weights,
-                            options_file=args.elmo_options)
+        if args.gpu and torch.cuda.is_available():
+            elmo = ElmoEmbedder(weight_file=args.elmo_weights,
+                                options_file=args.elmo_options,
+                                cuda_device=args.gpu)
+        else:
+            elmo = ElmoEmbedder(weight_file=args.elmo_weights,
+                                options_file=args.elmo_options)
         slot_featurizer = ElmoFeaturizer(elmo, "slot")
         value_featurizer = ElmoFeaturizer(elmo, "value")
     else:
