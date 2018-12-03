@@ -1,14 +1,12 @@
 from models.statenet import *
-import numpy as np
-import torch
 from util import util
 from util.featurize import *
 from tqdm import tqdm
-from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 import random
-from pprint import pprint
 import argparse
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
+from allennlp.commands.elmo import ElmoEmbedder
+
 
 DIM_INPUT = 400
 DIM_HIDDEN_LSTM = 128
@@ -52,20 +50,17 @@ def fix_s2v(_s2v, dialogs):
     return s2v_new
 
 
-def featurize_s2v(s2v_dict, w2v):
+def featurize_s2v(s2v_dict, slot_featurizer, value_featurizer):
     out = {}
-    oov = np.zeros(len(w2v.get("i")))
 
     for s, vs in s2v_dict.items():
         # remove domain prefix ('restaurant-priceRange' -> 'priceRange')
         domain, slot = s.split("-", 1)
         # split at uppercase to get vectors ('priceRange' -> ['price', 'range'])
         words = util.split_on_uppercase(slot, keep_contiguous=True)
-        vecs = np.array([w2v.get(w.lower()) for w in words])
-        if not len(vecs):
-            vecs = [oov]
-        slot_emb = np.max(vecs, 0)  # max across dimensions
-        vs_out = [Value(v, w2v.get(v, oov), idx) for idx, v in enumerate(vs)]
+        slot_emb = slot_featurizer.featurize_turn(words)
+        vs_out = [Value(v, value_featurizer.featurize_turn(v.split()), idx)
+                  for idx, v in enumerate(vs)]
         out[s] = Slot(domain, slot_emb, vs_out)
     return out
 
@@ -108,9 +103,16 @@ def featurize_dialogs(_data, _domains, _strict, s2v, w2v, M=3):
                 return _idx
         return -1
 
-    utt_ftz = UserInputNgramFeaturizer(w2v, n=M)
-    sys_ftz = UserInputNgramFeaturizer(w2v, n=M)
-    act_ftz = ActionFeaturizer(w2v)
+    if args.elmo:
+        elmo = ElmoEmbedder(weight_file=args.elmo_weights,
+                            options_file=args.elmo_options)
+        utt_ftz = ElmoFeaturizer(elmo, "utterance")
+        sys_ftz = ElmoFeaturizer(elmo, "utterance")
+        act_ftz = ElmoFeaturizer(elmo, "act")
+    else:
+        utt_ftz = UserInputNgramFeaturizer(w2v, n=M)
+        sys_ftz = UserInputNgramFeaturizer(w2v, n=M)
+        act_ftz = ActionFeaturizer(w2v)
 
     for dg in tqdm(_data):
         featurized_turns = []
@@ -132,7 +134,7 @@ def featurize_dialogs(_data, _domains, _strict, s2v, w2v, M=3):
             dom = [slot.split("-")[0] for slot in lbls]
             x_utt = utt_ftz.featurize_turn(utt)
             x_act = act_ftz.featurize_turn(act)
-            x_sys = sys_ftz.featurize_turn(sys)
+            x_sys = sys_ftz.featurize_turn([sys])
 
             ys = {}
             for slot, val in lbls.items():
@@ -174,21 +176,31 @@ def run(args):
 
     data_tr = filter_dialogs(data_tr, domains, strict, args.max_train_dialogs,
                              args.max_dialog_length)
-    data_dv = filter_dialogs(data_dv, domains, strict, args.max_train_dialogs,
+    data_dv = filter_dialogs(data_dv, domains, strict, args.max_dev_dialogs,
                              args.max_dialog_length)
 
     print(len(s2v))
     s2v = fix_s2v(s2v, data_tr + data_dv)
     print(s2v, len(s2v))
 
-    s2v = featurize_s2v(s2v, w2v)
+    if args.elmo:
+        elmo = ElmoEmbedder(weight_file=args.elmo_weights,
+                            options_file=args.elmo_options)
+        slot_featurizer = ElmoFeaturizer(elmo, "slot")
+        value_featurizer = ElmoFeaturizer(elmo, "value")
+    else:
+        slot_featurizer = SlotFeaturizer(w2v)
+        value_featurizer = ValueFeaturizer(w2v)
+    s2v = featurize_s2v(s2v, slot_featurizer, value_featurizer)
 
     print("Featurizing...")
     data_f_tr = featurize_dialogs(data_tr, domains, strict, s2v, w2v, M=args.M)
     data_f_dv = featurize_dialogs(data_dv, domains, strict, s2v, w2v, M=args.M)
     # print(data_tr[0].to_dict()['turns'][0]['system_acts'])
 
-    model = util.load_model(DIM_INPUT * args.M, DIM_INPUT, DIM_INPUT, DIM_INPUT,
+    DIM_INPUT = len(data_f_tr[0].turns[0].x_act)
+    print(DIM_INPUT)
+    model = util.load_model(DIM_INPUT, DIM_INPUT, DIM_INPUT, DIM_INPUT,
                             DIM_HIDDEN_ENC, args.receptors, args)
     if args.resume:
         model.load_best_save(directory=args.resume)

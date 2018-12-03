@@ -13,7 +13,6 @@ from util import util
 from collections import defaultdict
 from pprint import pformat
 from eval import evaluate_preds
-from allennlp.commands.elmo import ElmoEmbedder
 from collections import namedtuple
 
 # TODO refactor such that encoder classes are declared within StateNet, allows
@@ -26,25 +25,6 @@ Turn = namedtuple("Turn", ["user_utt", "system_act", "system_utt",
 Dialog = namedtuple("Dialog", ["turns"])
 Slot = namedtuple("Slot", ["domain", "embedding", "values"])
 Value = namedtuple("Value", ["value", "embedding", "idx"])
-
-
-class ElmoEncoder(nn.Module):
-
-    def __init__(self, elmo, args, hidden_dim):
-        super().__init__()
-        self.elmo = elmo
-        self.linear = nn.Linear(3*256, hidden_dim)
-
-    def forward(self, tokens):
-        # batch_to_embeddings because returns torch tensor, everything can stay
-        # on GPU this way. Returns tuple ([batch_size, layers, tokens, hidden],
-        # mask). We just get the first item in that batch as there's just one.
-        if type(tokens) == str:
-            tokens = tokens.split()
-        tokens = ["<bos>"] + tokens + ["<eos>"]
-        e_toks = self.elmo.batch_to_embeddings(tokens)[0][0]
-        e_flat = torch.max(e_toks, dim=1)[0].view(-1)  # max over tokens & flatten
-        return torch.sigmoid(self.linear(e_flat))
 
 
 class MultiScaleReceptors(nn.Module):
@@ -116,9 +96,6 @@ class UtteranceEncoder(nn.Module):
 
     def __init__(self, in_dim, out_dim, receptors):
         super().__init__()
-        self.receptors = receptors
-        # TODO multiple receptors
-        # self.layers = [nn.Linear(in_dim, out_dim) for _ in range(receptors)]
         self.layer_norm = LayerNorm(in_dim)
         self.linear_out = nn.Linear(in_dim, out_dim)
 
@@ -132,6 +109,7 @@ class UtteranceEncoder(nn.Module):
             out = self.layer_norm(user_utterance)
         except RuntimeError:
             print(user_utterance, user_utterance.shape)
+            raise RuntimeError
 
         out = F.relu(out)
         out = self.linear_out(out)
@@ -280,35 +258,24 @@ class StateNet(nn.Module):
         else:
             slot_hidden_dim = 2 * hidden_dim
 
+        if not args.elmo:
+            input_user_dim = input_user_dim * args.M
+        u_in_dim = input_user_dim
+        a_in_dim = input_action_dim
+        s_in_dim = input_user_dim
+        # self.utterance_encoder = UtteranceEncoder(u_in_dim, hidden_dim,
+        #                                           receptors)
+        n = int(u_in_dim / a_in_dim)
         if args.elmo:
-            if args.gpu:
-                elmo = ElmoEmbedder(weight_file=args.elmo_weights,
-                                    options_file=args.elmo_options,
-                                    cuda_device=args.gpu)
-            else:
-                elmo = ElmoEmbedder(weight_file=args.elmo_weights,
-                                    options_file=args.elmo_options)
-
-            self.utt_enc = ElmoEncoder(elmo, args, hidden_dim)
-            self.action_encoder = ElmoEncoder(elmo, args, hidden_dim)
-            self.slot_encoder = ElmoEncoder(elmo, args, slot_hidden_dim)
-            self.value_encoder = ElmoEncoder(elmo, args, hidden_dim)
-
+            self.utt_enc = UtteranceEncoder(u_in_dim, hidden_dim, receptors)
         else:
-            u_in_dim = input_user_dim
-            a_in_dim = input_action_dim
-            s_in_dim = input_user_dim
-            # self.utterance_encoder = UtteranceEncoder(u_in_dim, hidden_dim,
-            #                                           receptors)
-            n = int(u_in_dim / a_in_dim)
             self.utt_enc = MultiScaleReceptorsModule(a_in_dim, hidden_dim,
                                                      receptors, n)
-            self.action_encoder = ActionEncoder(a_in_dim, hidden_dim)
-            self.slot_encoder = SlotEncoder(input_slot_dim, slot_hidden_dim,
-                                            self.device)
-            self.value_encoder = ValueEncoder(input_value_dim, hidden_dim,
+        self.action_encoder = ActionEncoder(a_in_dim, hidden_dim)
+        self.slot_encoder = SlotEncoder(input_slot_dim, slot_hidden_dim,
+                                        self.device)
+        self.value_encoder = ValueEncoder(input_value_dim, hidden_dim,
                                               self.device)
-
         self.prediction_encoder = PredictionEncoder(slot_hidden_dim,
                                                     hidden_dim, hidden_dim)
         self.slot_fill_indicator = nn.Linear(hidden_dim, 1)
@@ -374,36 +341,27 @@ class StateNet(nn.Module):
         probs = {}
         binary_filling_probs = {}
 
-        # Encode user and action representations offline
+        # Encode user and action representations
         if self.args.elmo:
-            fu = self.utt_enc([turn.user_utt])
-            flat_act = [item for sublist in turn.system_act for item in sublist]
-            fa = self.action_encoder(flat_act)
-            fy = None
-            if self.args.encode_sys_utt:
-                fy = self.utt_enc([turn.system_utt])
+            utt = turn.x_utt.to(self.device)
+            sys = turn.x_sys.to(self.device)
         else:
             utt = [t.to(self.device) for t in turn.x_utt]  # one vector per n
-            act = turn.x_act.to(self.device)
             sys = [t.to(self.device) for t in turn.x_sys]  # one vector per n
+        act = turn.x_act.to(self.device)
 
-            fu = self.utt_enc(utt)  # user input encoding
-            fa = self.action_encoder(act)  # action input encodingdebug
-            fy = None
-            if self.args.encode_sys_utt:
-                fy = self.utt_enc(sys)
+        fu = self.utt_enc(utt)  # user input encoding
+        fa = self.action_encoder(act)  # action input encodingdebug
+        fy = None
+        if self.args.encode_sys_utt:
+            fy = self.utt_enc(sys)
 
         loss_updates = torch.Tensor([0]).to(self.device)
 
         # iterate over slots and values, compute probabilities
         for slot_id, slot in slots2values.items():
             # compute encoding of inputs as described in StateNet paper, Sec. 2
-            if self.args.elmo:
-                fs = self.slot_encoder(slot_id.split("-"))
-            else:
-                fs = self.slot_encoder(slot.embedding)
-            # i = torch.cat((fu, fa), 0)
-            # i = F.mul(fs, i)
+            fs = self.slot_encoder(slot.embedding)
             if self.args.encode_sys_utt:
                 i = F.mul(fs, torch.cat((fu, fa, fy), 0))  # inputs encoding
             else:
@@ -483,7 +441,6 @@ class StateNet(nn.Module):
 
         global_loss = global_loss / len(dialog.turns)
         dialog_mean_slots_filled = np.mean(per_turn_mean_slots_filled)
-        print(ys, ys_turn)
         return ys, ys_turn, global_loss, dialog_mean_slots_filled
 
     def run_train(self, dialogs_train, dialogs_dev, s2v, args):

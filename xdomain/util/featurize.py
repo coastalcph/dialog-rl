@@ -90,6 +90,29 @@ class Featurizer:
         pass
 
 
+class ElmoFeaturizer(Featurizer):
+
+    def __init__(self, elmo, mode):
+        super().__init__()
+        self.elmo = elmo
+        self.mode = mode
+
+    def featurize_turn(self, turn):
+        if self.mode == "utterance":
+            turn = ["<bos>"] + turn + ["<eos>"]
+        elif self.mode == "act":
+            turn = [item for sublist in turn for item in sublist]
+        elif self.mode in ["slot", "value"]:
+            turn = [turn]
+        # get elmo embeddings
+        if not turn:
+            turn = [["<NIL>"]]
+        e_toks = self.elmo.batch_to_embeddings(turn)[0][0]
+
+        # max over tokens & flatten
+        return torch.max(e_toks, dim=1)[0].view(-1)
+
+
 class UserInputNgramFeaturizer(Featurizer):
 
     def __init__(self, embeddings, n=2):
@@ -205,16 +228,30 @@ class SlotFeaturizer(Featurizer):
     def __init__(self, embeddings):
         super().__init__()
         self.embeddings = embeddings
+        oov_len = len(embeddings[list(embeddings.keys())[0]])
+        self.oov = np.zeros(oov_len)
 
-    def featurize_slot(self, slot):
-        e = self.embeddings.get(slot)
-        if not e:
-            e = np.zeros(len(self.embeddings.get("i")))
-        return torch.Tensor(e)
+    def featurize_turn(self, slot):
+        vecs = np.array([self.embeddings.get(w.lower(), self.oov)
+                         for w in slot])
+        if not len(vecs):
+            vecs = [self.oov]
+        slot_emb = np.max(vecs, 0)  # max across dimensions
+        return torch.Tensor(slot_emb)
 
 
 class ValueFeaturizer(Featurizer):
 
-    def __init__(self):
+    def __init__(self, embeddings):
         super().__init__()
+        self.embeddings = embeddings
+        oov_len = len(embeddings[list(embeddings.keys())[0]])
+        self.oov = np.zeros(oov_len)
 
+    def featurize_turn(self, val):
+        vecs = np.array([self.embeddings.get(w.lower(), self.oov)
+                         for w in val])
+        if not len(vecs):
+            vecs = [self.oov]
+        val_emb = np.max(vecs, 0)  # max across dimensions
+        return torch.Tensor(val_emb)
