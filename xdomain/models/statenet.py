@@ -449,7 +449,8 @@ class StateNet(nn.Module):
         if self.optimizer is None:
             self.set_optimizer()
         self.logger.info("Starting training...")
-        s2v = self.s2v_to_device(s2v)
+        if torch.cuda.is_available() and 'cuda' in self.device:
+            s2v = self.s2v_to_device(s2v)
         best = {}
         iteration = 0
         for epoch in range(1, args.epochs+1):
@@ -483,9 +484,13 @@ class StateNet(nn.Module):
             predictions, turn_predictions = zip(*train_predictions)
             summary.update({'eval_train_{}'.format(k):v for k, v in
                             evaluate_preds(dialogs_train, predictions,
-                                           turn_predictions).items()})
+                                           turn_predictions, args.eval_domains
+                                           ).items()})
             summary.update({'eval_dev_{}'.format(k):v for k, v in
-                            self.run_eval(dialogs_dev, s2v).items()})
+                            self.run_eval(dialogs_dev, s2v, args.eval_domains,
+                                          self.args.dout +
+                                          "/prediction_dv_{}.json".format(epoch)
+                                          ).items()})
 
             global_mean_slots_filled = np.mean(global_mean_slots_filled)
             self.logger.info("Predicted {}% slots as present".format(global_mean_slots_filled*100))
@@ -524,10 +529,10 @@ class StateNet(nn.Module):
             predictions.append((predictions_d, turn_predictions))
         return predictions
 
-    def run_eval(self, dialogs, s2v):
+    def run_eval(self, dialogs, s2v, eval_domains, outfile):
         predictions, turn_predictions = zip(*self.run_pred(dialogs, s2v))
         return evaluate_preds(dialogs, predictions, turn_predictions,
-                              self.args.dout+"/prediction.json")
+                              eval_domains, outfile)
 
     def save(self, summary, identifier):
         fname = '{}/{}.t7'.format(self.args.dout, identifier)
@@ -586,12 +591,12 @@ class StateNet(nn.Module):
     def s2v_to_device(self, s2v):
         s2v_new = {}
         for slot_name, slot in s2v.items():
-            slot_emb = torch.Tensor(slot.embedding)
+            slot_emb = torch.cuda.FloatTensor(slot.embedding.to(self.device))
             if 'cuda' not in slot_emb.device.type:
                 slot_emb = slot_emb.to(self.device)
             vals_new = []
             for val in slot.values:
-                val_emb = torch.Tensor(val.embedding).to(self.device)
+                val_emb = torch.cuda.FloatTensor(val.embedding.to(self.device))
                 if 'cuda' not in val_emb.device.type:
                     val_emb = val_emb.to(self.device)
                 vals_new.append(Value(val.value, val_emb, val.idx))

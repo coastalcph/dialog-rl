@@ -273,6 +273,8 @@ def get_args():
     parser.add_argument('--dropout', nargs='*', help='dropout rates', default=['emb=0.2', 'local=0.2', 'global=0.2'])
     parser.add_argument('--pretrain_domains', nargs='+', help='Domains on which to pretrain', default='all')
     parser.add_argument('--finetune_domain', nargs=1, help='Domain on which to finetune')
+    parser.add_argument('--eval_domains', nargs='+',
+                        help='Domains on which to evaluate', default='all')
     parser.add_argument('--pretrain_single_domain', action='store_true', help='Restrict pretraining to single-domain dialogs')
     parser.add_argument('--finetune_single_domain', action='store_true', help='Restrict finetuning to single-domain dialogs')
     parser.add_argument('--eta', help='factor for loss for binary slot filling prediction', default=0.5, type=float)
