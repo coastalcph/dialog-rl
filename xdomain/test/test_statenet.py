@@ -14,13 +14,37 @@ DIM_HIDDEN_ENC = 128
 
 
 def delexicalize(s2v):
-    slots = ["hotel-reference", "restaurant-reference", "restaurant-time",
-             "taxi-arriveBy", "taxi-leaveAt", "taxi-phone",
-             "train-arriveBy", "train-leaveAt", "train-reference",
-             "train-trainID"]
+    slots = [
+        "attraction-area",
+        "attraction-name",
+        "attraction-type",
+        "hotel-area",
+        "hotel-day",
+        "hotel-internet",
+        "hotel-name",
+        "hotel-parking",
+        "hotel-people",
+        "hotel-pricerange",
+        "hotel-stars",
+        "hotel-stay",
+        "hotel-type",
+        "restaurant-area",
+        "restaurant-day",
+        "restaurant-food",
+        "restaurant-name",
+        "restaurant-people",
+        "restaurant-pricerange",
+        "restaurant-time",
+        "taxi-arriveBy",
+        "taxi-leaveAt",
+        "taxi-type",
+        "train-arriveBy",
+        "train-day",
+        "train-leaveAt",
+        "train-people"]
     out = {}
     for s, v in s2v.items():
-        if s in slots:
+        if s not in slots:
             out[s] = ["<true>"]
         else:
             out[s] = v
