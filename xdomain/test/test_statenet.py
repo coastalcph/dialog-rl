@@ -141,6 +141,13 @@ def featurize_dialogs(_data, _domains, _strict, s2v, w2v, M=3):
     for dg in tqdm(_data):
         featurized_turns = []
 
+        all_user_utts = []
+        all_system_acts = []
+        all_system_utts = []
+        all_lbls = []
+        all_ys = []
+        all_bsts = []
+
         for t in dg['turns']:
             utt = t['transcript']
             sys = t['system_transcript']
@@ -154,21 +161,30 @@ def featurize_dialogs(_data, _domains, _strict, s2v, w2v, M=3):
                 else:
                     lbls[s] = "<true>"
 
-            # lbl = {s: v.lower() for s, v in t['turn_label']}
-            dom = [slot.split("-")[0] for slot in lbls]
-            x_utt = utt_ftz.featurize_turn(utt)
-            x_act = act_ftz.featurize_turn(act)
-            x_sys = sys_ftz.featurize_turn([sys])
-
             ys = {}
             for slot, val in lbls.items():
                 values = s2v[slot].values
                 ys[slot] = torch.zeros(len(values))
                 idx = get_value_index(values, val)
                 ys[slot][idx] = 1
-            featurized_turns.append(Turn(utt, act, sys,
-                                         x_utt, x_act, x_sys,
-                                         ys, lbls, bst))
+
+            all_user_utts.append(utt)
+            all_system_acts.append(act)
+            all_system_utts.append(sys.split())
+            all_ys.append(ys)
+            all_lbls.append(lbls)
+            all_bsts.append(bst)
+
+        all_x_utt = utt_ftz.featurize_batch(all_user_utts)
+        all_x_act = act_ftz.featurize_batch(all_system_acts)
+        all_x_sys = sys_ftz.featurize_batch(all_system_utts)
+
+        for i in range(len(dg['turns'])):
+            featurized_turns.append(Turn(
+                all_user_utts[i], all_system_acts[i], all_system_utts[i],
+                all_x_utt[i], all_x_act[i], all_x_sys[i],
+                all_ys[i], all_lbls[i], all_bsts[i]))
+
         featurized_dialogs.append(Dialog(featurized_turns))
 
     return featurized_dialogs

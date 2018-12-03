@@ -112,6 +112,17 @@ class ElmoFeaturizer(Featurizer):
         # max over tokens & flatten
         return torch.max(e_toks, dim=1)[0].view(-1)
 
+    def featurize_batch(self, batch):
+        if self.mode == "utterance":
+            batch = [["<bos>"] + turn + ["<eos>"] for turn in batch]
+        elif self.mode == "act":
+            batch = [[item for sublist in turn for item in sublist] for turn in batch]
+        elif self.mode in ["slot", "value"]:
+            batch = [[turn] for turn in batch]
+        E = self.elmo.batch_to_embeddings(batch)[0]
+        E = torch.max(E, dim=2)[0].view(len(batch), -1)
+        return E
+
 
 class UserInputNgramFeaturizer(Featurizer):
 
@@ -152,6 +163,9 @@ class UserInputNgramFeaturizer(Featurizer):
     def featurize_dialog(self, dialog):
         return [self.featurize_turn(t) for t in dialog.to_dict()['turns']]
 
+    def featurize_batch(self, batch):
+        return [self.featurize_turn(t) for t in batch]
+
 
 class UserInputFeaturizer(Featurizer):
 
@@ -188,6 +202,9 @@ class UserInputFeaturizer(Featurizer):
     def featurize_dialog(self, dialog):
         return [self.featurize_turn(t) for t in dialog.to_dict()['turns']]
 
+    def featurize_batch(self, batch):
+        return [self.featurize_turn(t) for t in batch]
+
 
 class ActionFeaturizer(Featurizer):
 
@@ -222,6 +239,9 @@ class ActionFeaturizer(Featurizer):
         else:
             return torch.zeros(len(self.embeddings['i']))
 
+    def featurize_batch(self, batch):
+        return [self.featurize_turn(t) for t in batch]
+
 
 class SlotFeaturizer(Featurizer):
 
@@ -239,6 +259,9 @@ class SlotFeaturizer(Featurizer):
         slot_emb = np.max(vecs, 0)  # max across dimensions
         return torch.Tensor(slot_emb)
 
+    def featurize_batch(self, batch):
+        return [self.featurize_turn(t) for t in batch]
+
 
 class ValueFeaturizer(Featurizer):
 
@@ -255,3 +278,6 @@ class ValueFeaturizer(Featurizer):
             vecs = [self.oov]
         val_emb = np.max(vecs, 0)  # max across dimensions
         return torch.Tensor(val_emb)
+
+    def featurize_batch(self, batch):
+        return [self.featurize_turn(t) for t in batch]
