@@ -83,7 +83,8 @@ def featurize_s2v(s2v_dict, slot_featurizer, value_featurizer):
         # split at uppercase to get vectors ('priceRange' -> ['price', 'range'])
         words = util.split_on_uppercase(slot, keep_contiguous=True)
         slot_emb = slot_featurizer.featurize_turn(words)
-        vs_out = [Value(v, value_featurizer.featurize_turn(v.split()), idx)
+        v_embs = value_featurizer.featurize_batch([v.split() for v in vs])
+        vs_out = [Value(v, v_embs[idx], idx)
                   for idx, v in enumerate(vs)]
         out[s] = Slot(domain, slot_emb, vs_out)
     return out
@@ -195,7 +196,7 @@ def train(model, data_tr, data_dv, s2v, args):
 
 
 def run(args):
-
+    print(args)
     domains = args.pretrain_domains
     strict = args.pretrain_single_domain
     print('Training on domains: ',  domains)
@@ -239,7 +240,6 @@ def run(args):
     # print(data_tr[0].to_dict()['turns'][0]['system_acts'])
 
     DIM_INPUT = len(data_f_tr[0].turns[0].x_act)
-    print(DIM_INPUT)
     model = util.load_model(DIM_INPUT, DIM_INPUT, DIM_INPUT, DIM_INPUT,
                             DIM_HIDDEN_ENC, args.receptors, args)
     if args.resume:

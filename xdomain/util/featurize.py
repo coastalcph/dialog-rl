@@ -117,8 +117,8 @@ class ElmoFeaturizer(Featurizer):
             batch = [["<bos>"] + turn + ["<eos>"] for turn in batch]
         elif self.mode == "act":
             batch = [[item for sublist in turn for item in sublist] for turn in batch]
-        elif self.mode in ["slot", "value"]:
-            batch = [[turn] for turn in batch]
+        # elif self.mode in ["slot", "value"]:
+        #     batch = [[turn] for turn in batch]
         E = self.elmo.batch_to_embeddings(batch)[0]
         E = torch.max(E, dim=2)[0].view(len(batch), -1)
         return E
