@@ -7,6 +7,8 @@ def evaluate_preds(dialogs, preds, turn_predictions, eval_domains=None,
     inform = []
     joint_goal = []
     belief_state = []
+    final_binary_slot_precision = []
+    final_binary_slot_recall = []
     binary_slot_precision = []
     binary_slot_recall = []
     f = None
@@ -66,6 +68,13 @@ def evaluate_preds(dialogs, preds, turn_predictions, eval_domains=None,
                 continue
             if s in preds[di]:
                 belief_state.append(v == preds[di][s])
+            final_binary_slot_recall.append(s in preds[di])
+
+        for s in preds[di]:
+            s_domain = s.split("-")[0]
+            if eval_domains and s_domain not in eval_domains:
+                continue
+            final_binary_slot_precision.append(s in gold_final_belief)
 
         dialog_out["gold_final_belief"] = gold_final_belief
         dialog_out["pred_final_belief"] = {s: v for s, v in preds[di].items()}
@@ -76,6 +85,10 @@ def evaluate_preds(dialogs, preds, turn_predictions, eval_domains=None,
         json.dump(dialogs_out, f)
         f.close()
 
+    final_R = np.mean(final_binary_slot_recall)
+    final_P = np.mean(final_binary_slot_precision)
+    final_binary_slot_F1 = 2 * final_R * final_P / (final_R + final_P)
+
     R = np.mean(binary_slot_recall)
     P = np.mean(binary_slot_precision)
     binary_slot_F1 = 2*R*P / (R+P)
@@ -85,6 +98,7 @@ def evaluate_preds(dialogs, preds, turn_predictions, eval_domains=None,
                 # 'turn_request': np.mean(request),
                 'joint_goal': np.mean(joint_goal),
                 'belief_state': np.mean(belief_state),
+                'final_binary_slot_f1': final_binary_slot_F1,
                 'binary_slot_p': P,
                 'binary_slot_r': R,
                 'binary_slot_f1': binary_slot_F1

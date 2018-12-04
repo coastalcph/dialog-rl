@@ -555,13 +555,13 @@ class StateNet(nn.Module):
                 dialog_scores = []
                 iteration += 1
                 self.zero_grad()
-                predictions, turn_predictions, scores, loss, mean_slots_filled = \
+                predictions, _, scores, loss, mean_slots_filled = \
                     self.forward(dialog, s2v)
-                train_predictions.append((predictions, turn_predictions))
+                train_predictions.append((predictions, _))
 
-                dialog_reward = evaluate_preds([dialog], [predictions],
-                                               [turn_predictions],
-                                               args.eval_domains)['joint_goal']
+                dialog_reward = evaluate_preds(
+                    [dialog], [predictions], [[]], args.eval_domains
+                )['final_binary_slot_f1']
                 for s, slot in enumerate(scores):
                     for t in range(len(scores[slot])):
                         slot_turn_scores = F.softmax(scores[slot][t])
@@ -594,7 +594,8 @@ class StateNet(nn.Module):
             summary.update({'eval_dev_{}'.format(k): v for k, v in
                             self.run_eval(dialogs_dev, s2v, args.eval_domains,
                                           self.args.dout +
-                                          "/prediction_dv_{}.json".format(epoch)
+                                          "/prediction_dv_{}_{}.json".
+                                          format(epoch, str(args.eval_domains))
                                           ).items()})
 
             global_mean_slots_filled = np.mean(global_mean_slots_filled)
