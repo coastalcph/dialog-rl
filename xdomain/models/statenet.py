@@ -6,10 +6,9 @@ from torch import nn
 from torch import optim
 from torch.nn import functional as F
 from torch.nn.modules.normalization import LayerNorm
-from torch.autograd import Variable as V
+from torch.distributions import Categorical
 import numpy as np
 from tqdm import tqdm
-from util import util
 from collections import defaultdict
 from pprint import pformat
 from eval import evaluate_preds
@@ -25,6 +24,8 @@ Turn = namedtuple("Turn", ["user_utt", "system_act", "system_utt",
 Dialog = namedtuple("Dialog", ["turns"])
 Slot = namedtuple("Slot", ["domain", "embedding", "values"])
 Value = namedtuple("Value", ["value", "embedding", "idx"])
+
+eps = np.finfo(np.float32).eps.item()
 
 
 class MultiScaleReceptors(nn.Module):
@@ -57,12 +58,10 @@ class MultiScaleReceptorsModule(nn.Module):
         super().__init__()
         self.receptors = receptors
         self.n = n
-        #self.layer_norm = LayerNorm(in_dim)
         self.layer_norm = LayerNorm(receptors * out_dim)
-        #self.linear_out = nn.Linear(in_dim, out_dim)
         self.linear_out = nn.Linear(receptors * out_dim, out_dim)
 
-        # Initialize the c linear networks for each k-gram utt rep for 1 >= k >= n
+        # Initialize the c linear nets for each k-gram utt rep for 1 >= k >= n
         for i in range(n):
             msr_in_dim = in_dim * (i + 1)
             setattr(self, 'linear_out_r{}'.format(i),
@@ -94,7 +93,7 @@ class UtteranceEncoder(nn.Module):
 
     """
 
-    def __init__(self, in_dim, out_dim, receptors):
+    def __init__(self, in_dim, out_dim):
         super().__init__()
         self.layer_norm = LayerNorm(in_dim)
         self.linear_out = nn.Linear(in_dim, out_dim)
@@ -262,12 +261,10 @@ class StateNet(nn.Module):
             input_user_dim = input_user_dim * args.M
         u_in_dim = input_user_dim
         a_in_dim = input_action_dim
-        s_in_dim = input_user_dim
-        # self.utterance_encoder = UtteranceEncoder(u_in_dim, hidden_dim,
-        #                                           receptors)
+        # s_in_dim = input_user_dim
         n = int(u_in_dim / a_in_dim)
         if args.elmo:
-            self.utt_enc = UtteranceEncoder(u_in_dim, hidden_dim, receptors)
+            self.utt_enc = UtteranceEncoder(u_in_dim, hidden_dim)
         else:
             self.utt_enc = MultiScaleReceptorsModule(a_in_dim, hidden_dim,
                                                      receptors, n)
@@ -275,7 +272,7 @@ class StateNet(nn.Module):
         self.slot_encoder = SlotEncoder(input_slot_dim, slot_hidden_dim,
                                         self.device)
         self.value_encoder = ValueEncoder(input_value_dim, hidden_dim,
-                                              self.device)
+                                          self.device)
         self.prediction_encoder = PredictionEncoder(slot_hidden_dim,
                                                     hidden_dim, hidden_dim)
         self.slot_fill_indicator = nn.Linear(hidden_dim, 1)
@@ -290,6 +287,7 @@ class StateNet(nn.Module):
 
     def set_optimizer(self):
         self.optimizer = optim.Adam(self.parameters(), lr=self.args.lr)
+        # self.optimizer = optim.SGD(self.parameters(), lr=self.args.lr)
 
     def get_train_logger(self):
         logger = logging.getLogger(
@@ -359,6 +357,8 @@ class StateNet(nn.Module):
 
         loss_updates = torch.Tensor([0]).to(self.device)
 
+        DEBUG = ""
+
         # iterate over slots and values, compute probabilities
         for slot_id, slot in slots2values.items():
             # compute encoding of inputs as described in StateNet paper, Sec. 2
@@ -370,11 +370,13 @@ class StateNet(nn.Module):
             o, hidden = self.prediction_encoder(i, hidden)
 
             # get binary prediction for slot presence
-            binary_filling_probs[slot_id] = torch.sigmoid(self.slot_fill_indicator(o))
+            binary_filling_probs[slot_id] = torch.sigmoid(
+                self.slot_fill_indicator(o))
+
+            DEBUG = (binary_filling_probs[slot_id], fs, slot.embedding, self.slot_encoder.linear.weight)
 
             # get probability distribution over values...
             values = slot.values
-
             if binary_filling_probs[slot_id] > 0.5:
                 probs[slot_id] = torch.zeros(len(values))
                 for v, value in enumerate(values):
@@ -387,12 +389,19 @@ class StateNet(nn.Module):
         if self.training:
             for slot_id in slots2values.keys():
                 # 1 if slot in turn.labels (meaning it's filled), 0 else
-                gold_slot_filling = torch.Tensor([float(slot_id in turn.labels)]).to(self.device)
-                loss += self.args.eta * F.binary_cross_entropy(
-                    binary_filling_probs[slot_id],
-                    gold_slot_filling).to(self.device)
+                gold_slot_filling = torch.Tensor(
+                    [float(slot_id in turn.labels)]).to(self.device)
+                try:
+                    loss += self.args.eta * F.binary_cross_entropy(
+                        binary_filling_probs[slot_id],
+                        gold_slot_filling).to(self.device)
+                except RuntimeError:
+                    print(slot_id, binary_filling_probs[slot_id], gold_slot_filling)
+                    print(DEBUG)
+                    raise RuntimeError
                 loss_updates += 1
-                if slot_id in turn.labels and binary_filling_probs[slot_id] > 0.5:
+                if slot_id in turn.labels and \
+                        binary_filling_probs[slot_id] > 0.5:
                     loss += F.binary_cross_entropy(
                         probs[slot_id],
                         turn.labels[slot_id]
@@ -415,14 +424,16 @@ class StateNet(nn.Module):
         global_loss = torch.Tensor([0]).to(self.device)
         per_turn_mean_slots_filled = []
         ys_turn = []
+        scores = defaultdict(list)
 
-        for turn in dialog.turns:
+        for t, turn in enumerate(dialog.turns):
             loss, turn_probs, hidden, mean_slots_filled = \
                 self.forward_turn(turn, slots2values, hidden)
             per_turn_mean_slots_filled.append(mean_slots_filled)
             global_loss += loss
             turn_preds = {}
             for slot_id, slot in slots2values.items():
+
                 if slot_id in turn_probs:
                     global_probs[slot_id] = torch.zeros(len(slot.values))
                     argmax = np.argmax(turn_probs[slot_id].detach().numpy(), 0)
@@ -431,6 +442,7 @@ class StateNet(nn.Module):
                     for v, value in enumerate(slot.values):
                         global_probs[slot_id][v] = max(global_probs[slot_id][v],
                                                        turn_probs[slot_id][v])
+                    scores[slot_id].append(turn_probs[slot_id])
 
             ys_turn.append(turn_preds)
 
@@ -442,7 +454,7 @@ class StateNet(nn.Module):
 
         global_loss = global_loss / len(dialog.turns)
         dialog_mean_slots_filled = np.mean(per_turn_mean_slots_filled)
-        return ys, ys_turn, global_loss, dialog_mean_slots_filled
+        return ys, ys_turn, scores, global_loss, dialog_mean_slots_filled
 
     def run_train(self, dialogs_train, dialogs_dev, s2v, args):
         track = defaultdict(list)
@@ -467,7 +479,7 @@ class StateNet(nn.Module):
             for dialog in tqdm(dialogs_train):
                 iteration += 1
                 self.zero_grad()
-                predictions, turn_predictions, loss, mean_slots_filled = \
+                predictions, turn_predictions, _, loss, mean_slots_filled = \
                     self.forward(dialog, s2v)
                 train_predictions.append((predictions, turn_predictions))
                 # print(turn_predictions)
@@ -482,18 +494,19 @@ class StateNet(nn.Module):
                 summary[k] = sum(v) / len(v)
             self.logger.info("Evaluating...")
             predictions, turn_predictions = zip(*train_predictions)
-            summary.update({'eval_train_{}'.format(k):v for k, v in
+            summary.update({'eval_train_{}'.format(k): v for k, v in
                             evaluate_preds(dialogs_train, predictions,
                                            turn_predictions, args.eval_domains
                                            ).items()})
-            summary.update({'eval_dev_{}'.format(k):v for k, v in
+            summary.update({'eval_dev_{}'.format(k): v for k, v in
                             self.run_eval(dialogs_dev, s2v, args.eval_domains,
                                           self.args.dout +
                                           "/prediction_dv_{}.json".format(epoch)
                                           ).items()})
 
             global_mean_slots_filled = np.mean(global_mean_slots_filled)
-            self.logger.info("Predicted {}% slots as present".format(global_mean_slots_filled*100))
+            self.logger.info("Predicted {}% slots as present".format(
+                global_mean_slots_filled*100))
             self.logger.info("Epoch summary: " + str(summary))
 
             # do early stopping saves
@@ -513,19 +526,132 @@ class StateNet(nn.Module):
                                         key=args.stop)
                           )
                 self.prune_saves()
-                # dialogs_dev.record_preds(  #TODO self.run_pred returns list of tuples (predictions_dialog, predictions_turn)
-                #     preds=self.run_pred(dialogs_dev, s2v, self.args),
-                #     to_file=os.path.join(self.args.dout, 'dev.pred.json'),
-                # )
             summary.update({'best_{}'.format(k): v for k, v in best.items()})
             self.logger.info(pformat(summary))
             track.clear()
+
+    def run_train_reinforce(self, dialogs_train, dialogs_dev, s2v, args):
+        track = defaultdict(list)
+        if self.optimizer is None:
+            self.set_optimizer()
+        self.logger.info("Starting reinforcement training...")
+        if torch.cuda.is_available() and self.device.type == 'cuda':
+            s2v = self.s2v_to_device(s2v)
+        best = {}
+        iteration = 0
+        for epoch in range(1, args.epochs + 1):
+            global_mean_slots_filled = []
+            # logger.info('starting epoch {}'.format(epoch))
+
+            if not hasattr(self, "epochs_trained"):
+                self.set_epochs_trained(0)
+            self.epochs_trained += 1
+
+            # train and update parameters
+            self.train()
+            train_predictions = []
+            for dialog in tqdm(dialogs_train):
+                dialog_rewards = []
+                dialog_scores = []
+                iteration += 1
+                self.zero_grad()
+                predictions, turn_predictions, scores, loss, mean_slots_filled = \
+                    self.forward(dialog, s2v)
+                train_predictions.append((predictions, turn_predictions))
+
+                dialog_reward = evaluate_preds([dialog], [predictions],
+                                               [turn_predictions],
+                                               args.eval_domains)['joint_goal']
+                for s, slot in enumerate(scores):
+                    for t in range(len(scores[slot])):
+                        slot_turn_scores = F.softmax(scores[slot][t])
+                        m = Categorical(slot_turn_scores)
+                        slot_turn_prediction = m.sample()
+                        slot_turn_prediction_log_prob = m.log_prob(
+                            slot_turn_prediction)
+                        # credit assignment: copy dialog-level reward to each
+                        # slot/turn
+                        dialog_rewards.append(dialog_reward)
+                        dialog_scores.append(slot_turn_prediction_log_prob)
+
+                # print(turn_predictions)
+                global_mean_slots_filled.append(mean_slots_filled)
+                track['loss'].append(loss.item())
+                if dialog_rewards:
+                    self.reinforce_update(dialog_rewards, dialog_scores,
+                                          self.args.gamma)
+
+            # evalute on train and dev
+            summary = {'iteration': iteration, 'epoch': self.epochs_trained}
+            for k, v in track.items():
+                summary[k] = sum(v) / len(v)
+            self.logger.info("Evaluating...")
+            predictions, turn_predictions = zip(*train_predictions)
+            summary.update({'eval_train_{}'.format(k): v for k, v in
+                            evaluate_preds(dialogs_train, predictions,
+                                           turn_predictions, args.eval_domains
+                                           ).items()})
+            summary.update({'eval_dev_{}'.format(k): v for k, v in
+                            self.run_eval(dialogs_dev, s2v, args.eval_domains,
+                                          self.args.dout +
+                                          "/prediction_dv_{}.json".format(epoch)
+                                          ).items()})
+
+            global_mean_slots_filled = np.mean(global_mean_slots_filled)
+            self.logger.info("Predicted {}% slots as present".format(
+                global_mean_slots_filled * 100))
+            self.logger.info("Epoch summary: " + str(summary))
+
+            # do early stopping saves
+            stop_key = 'eval_dev_{}'.format(args.stop)
+            train_key = 'eval_train_{}'.format(args.stop)
+            if best.get(stop_key, 0) <= summary[stop_key]:
+                best_dev = '{:f}'.format(summary[stop_key])
+                best_train = '{:f}'.format(summary[train_key])
+                best.update(summary)
+                self.save(best,
+                          identifier='epoch={epoch},iter={iteration},'
+                                     'train_{key}={train},dev_{key}={dev}'
+                                     ''.
+                          format(epoch=self.epochs_trained,
+                                 iteration=iteration, train=best_train,
+                                 dev=best_dev, key=args.stop))
+                self.prune_saves()
+            summary.update({'best_{}'.format(k): v for k, v in best.items()})
+            self.logger.info(pformat(summary))
+            track.clear()
+
+    def reinforce_update(self, batch_rewards, log_probs, gamma):
+        R = 0
+        rewards = []
+        policy_loss = []
+        for r in batch_rewards[::-1]:
+            R = r + gamma * R
+            rewards.insert(0, R)
+        rewards = torch.Tensor(rewards)
+
+        rewards = (rewards - rewards.mean()) / (rewards.std() + eps)
+        for log_prob, reward in zip(log_probs, rewards):
+            policy_loss.append(-log_prob * reward)
+            # policy_loss.append(-log_prob * (reward+0.001))
+            # local_policy_loss = -log_prob * (reward+0.001)
+            # local_policy_loss.backward()
+            # policy_loss.backward()
+            # policy_loss.append(reward)
+        self.optimizer.zero_grad()
+        policy_loss = torch.stack(policy_loss).sum()
+        # policy_loss = torch.autograd.Variable(policy_loss)
+        # print(policy_loss)
+        # policy_loss.backward(retain_graph=True)
+        if policy_loss > 0:
+            policy_loss.backward()
+            self.optimizer.step()
 
     def run_pred(self, dialogs, s2v):
         self.eval()
         predictions = []
         for d in tqdm(dialogs):
-            predictions_d, turn_predictions, _, _ = self.forward(d, s2v)
+            predictions_d, turn_predictions, _, _, _ = self.forward(d, s2v)
             predictions.append((predictions_d, turn_predictions))
         return predictions
 
@@ -585,7 +711,7 @@ class StateNet(nn.Module):
                 scores.append((score, os.path.join(directory, fname)))
         if not scores:
             raise Exception('No files found!')
-        scores.sort(key=lambda tup:tup[0], reverse=True)
+        scores.sort(key=lambda tup: tup[0], reverse=True)
         return scores
 
     def s2v_to_device(self, s2v):
@@ -602,4 +728,3 @@ class StateNet(nn.Module):
                 vals_new.append(Value(val.value, val_emb, val.idx))
             s2v_new[slot_name] = Slot(slot.domain, slot_emb, vals_new)
         return s2v_new
-

@@ -8,7 +8,7 @@ from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 from allennlp.commands.elmo import ElmoEmbedder
 
 
-DIM_INPUT = 400
+# DIM_INPUT = 400
 DIM_HIDDEN_LSTM = 128
 DIM_HIDDEN_ENC = 128
 
@@ -119,7 +119,7 @@ def filter_dialogs(data, domains, strict, max_dialogs, max_turns_per_dialog):
     return out
 
 
-def featurize_dialogs(_data, _domains, _strict, s2v, w2v, M=3):
+def featurize_dialogs(_data, _domains, _strict, s2v, w2v, args):
     featurized_dialogs = []
 
     def get_value_index(_values, _val):
@@ -135,8 +135,8 @@ def featurize_dialogs(_data, _domains, _strict, s2v, w2v, M=3):
         sys_ftz = ElmoFeaturizer(elmo, "utterance")
         act_ftz = ElmoFeaturizer(elmo, "act")
     else:
-        utt_ftz = UserInputNgramFeaturizer(w2v, n=M)
-        sys_ftz = UserInputNgramFeaturizer(w2v, n=M)
+        utt_ftz = UserInputNgramFeaturizer(w2v, n=args.M)
+        sys_ftz = UserInputNgramFeaturizer(w2v, n=args.M)
         act_ftz = ActionFeaturizer(w2v)
 
     for dg in tqdm(_data):
@@ -191,18 +191,14 @@ def featurize_dialogs(_data, _domains, _strict, s2v, w2v, M=3):
     return featurized_dialogs
 
 
-def train(model, data_tr, data_dv, s2v, args):
-    model.run_train(data_tr, data_dv, s2v, args)
-
-
 def run(args):
     print(args)
-    domains = args.pretrain_domains
-    strict = args.pretrain_single_domain
+    domains = args.train_domains
+    strict = args.train_strict
     print('Training on domains: ',  domains)
     print('Single-domain dialogues only?', strict)
 
-    data, ontology, vocab, w2v = util.load_dataset(splits=['train','dev'],
+    data, ontology, vocab, w2v = util.load_dataset(splits=['train', 'dev'],
                                                    base_path=args.path)
 
     data_dv = data['dev']
@@ -240,8 +236,8 @@ def run(args):
     s2v = featurize_s2v(s2v, slot_featurizer, value_featurizer)
 
     print("Featurizing...")
-    data_f_tr = featurize_dialogs(data_tr, domains, strict, s2v, w2v, M=args.M)
-    data_f_dv = featurize_dialogs(data_dv, domains, strict, s2v, w2v, M=args.M)
+    data_f_tr = featurize_dialogs(data_tr, domains, strict, s2v, w2v, args)
+    data_f_dv = featurize_dialogs(data_dv, domains, strict, s2v, w2v, args)
     # print(data_tr[0].to_dict()['turns'][0]['system_acts'])
 
     DIM_INPUT = len(data_f_tr[0].turns[0].x_act)
@@ -255,64 +251,86 @@ def run(args):
         print(name, param.device)
 
     print("Training...")
-    train(model, data_f_tr, data_f_dv, s2v, args)
+    if args.reinforce:
+        model.run_train_reinforce(data_f_tr, data_f_dv, s2v, args)
+    else:
+        model.run_train(data_f_tr, data_f_dv, s2v, args)
 
 
 def get_args():
     parser = ArgumentParser(formatter_class=ArgumentDefaultsHelpFormatter)
     parser.add_argument('--dexp', help='root experiment folder', default='exp')
-    parser.add_argument('--model', help='which model to use', default='statenet')
-    parser.add_argument('--epochs', help='max epochs to run for', default=50, type=int)
-    parser.add_argument('--demb', help='word embedding size', default=400, type=int)
-    parser.add_argument('--dhid', help='hidden state size', default=200, type=int)
+    parser.add_argument('--model', help='which model to use',
+                        default='statenet')
+    parser.add_argument('--epochs', help='max epochs to run for', default=50,
+                        type=int)
+    parser.add_argument('--demb', help='word embedding size', default=400,
+                        type=int)
+    parser.add_argument('--dhid', help='hidden state size', default=200,
+                        type=int)
     parser.add_argument('--batch_size', help='batch size', default=50, type=int)
     parser.add_argument('--lr', help='learning rate', default=1e-3, type=float)
-    parser.add_argument('--stop', help='slot to early stop on', default='joint_goal')
+    parser.add_argument('--stop', help='slot to early stop on',
+                        default='joint_goal')
     parser.add_argument('--resume', help='save directory to resume from')
-    parser.add_argument('-n', '--nick', help='nickname for model', default='default')
-    parser.add_argument('--pretrain_reinforce', action='store_true', help='train with RL')
+    parser.add_argument('-n', '--nick', help='nickname for model',
+                        default='default')
+    parser.add_argument('--reinforce', action='store_true',
+                        help='train with RL')
     parser.add_argument('--gamma', help='RL discount', default=0.99, type=float)
     parser.add_argument('--seed', default=42, help='random seed', type=int)
-    parser.add_argument('--test', action='store_true', help='run in evaluation only mode')
+    parser.add_argument('--test', action='store_true',
+                        help='run in evaluation only mode')
     parser.add_argument('--gpu', type=int, help='which GPU to use')
-    parser.add_argument('--dropout', nargs='*', help='dropout rates', default=['emb=0.2', 'local=0.2', 'global=0.2'])
-    parser.add_argument('--pretrain_domains', nargs='+', help='Domains on which to pretrain', default='all')
-    parser.add_argument('--finetune_domain', nargs=1, help='Domain on which to finetune')
+    parser.add_argument('--dropout', nargs='*', help='dropout rates',
+                        default=['emb=0.2', 'local=0.2', 'global=0.2'])
+    parser.add_argument('--train_domains', nargs='+',
+                        help='Domains on which to train, If finetune_domains is'
+                             ' also set, these will be used for pretraining.',
+                        default='all')
+    parser.add_argument('--finetune_domains', nargs='+',
+                        help='Domains on which to finetune')
     parser.add_argument('--eval_domains', nargs='+',
                         help='Domains on which to evaluate', default='all')
-    parser.add_argument('--pretrain_single_domain', action='store_true', help='Restrict pretraining to single-domain dialogs')
-    parser.add_argument('--finetune_single_domain', action='store_true', help='Restrict finetuning to single-domain dialogs')
-    parser.add_argument('--eta', help='factor for loss for binary slot filling prediction', default=0.5, type=float)
+    parser.add_argument('--train_strict', action='store_true',
+                        help='Restrict pretraining to dialogs with '
+                             'train_domains only')
+    parser.add_argument('--finetune_strict', action='store_true',
+                        help='Restrict finetuning dialogs with '
+                             'finetune_domains only')
+    parser.add_argument('--eta', help='factor for loss for binary slot filling '
+                                      'prediction', default=0.5, type=float)
     parser.add_argument('--path', help='path to data files',
                         default='../data/multiwoz/ann/')
     parser.add_argument('--max_dialog_length', default=-1, type=int)
     parser.add_argument('--max_train_dialogs', default=-1, type=int)
     parser.add_argument('--max_dev_dialogs', default=-1, type=int)
-    parser.add_argument('--elmo', action='store_true', help="If set, use ELMo for encoding inputs")
-    parser.add_argument('--elmo_weights', default='res/elmo/elmo_2x1024_128_2048cnn_1xhighway_weights.hdf5')
+    parser.add_argument('--elmo', action='store_true',
+                        help="If set, use ELMo for encoding inputs")
+    parser.add_argument('--elmo_weights',
+                        default='res/elmo/elmo_2x1024_128_2048cnn_1xhighway_'
+                                'weights.hdf5')
     parser.add_argument('--elmo_options',
-                        default='res/elmo/elmo_2x1024_128_2048cnn_1xhighway_options.json')
+                        default='res/elmo/elmo_2x1024_128_2048cnn_1xhighway_'
+                                'options.json')
     parser.add_argument('--delexicalize_labels', action='store_true',
                         help="If set, replaces labels with dummy for select "
                              "slots")
     parser.add_argument('--encode_sys_utt', action='store_true',
                         help="If set, uses system utterance too, instead of "
                              "just system act representation")
-    parser.add_argument('--receptors', default=3, help='number of receptors per '
-                                                       'n-gram', type=int)
+    parser.add_argument('--receptors', default=3,
+                        help='number of receptors per n-gram', type=int)
     parser.add_argument('--M', default=3, help='max n-gram size', type=int)
 
-    args = parser.parse_args()
-    args.dout = os.path.join(args.dexp, args.model, args.nick)
-    args.dropout = {d.split('=')[0]: float(d.split('=')[1]) for d in args.dropout}
-    if not os.path.isdir(args.dout):
-        os.makedirs(args.dout)
-    return args
+    _args = parser.parse_args()
+    _args.dout = os.path.join(_args.dexp, _args.model, _args.nick)
+    _args.dropout = {d.split('=')[0]: float(d.split('=')[1])
+                     for d in _args.dropout}
+    if not os.path.isdir(_args.dout):
+        os.makedirs(_args.dout)
+    return _args
 
 
 if __name__ == '__main__':
-    args = get_args()
-    run(args)
-
-# hidden = torch.randn(1, 1, DIM_HIDDEN_LSTM)
-# sn.forward_turn(u, a, s2v, hidden)
+    run(get_args())
