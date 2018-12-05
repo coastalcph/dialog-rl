@@ -88,6 +88,8 @@ def evaluate_preds(dialogs, preds, turn_predictions, eval_domains=None,
     final_R = np.mean(final_binary_slot_recall)
     final_P = np.mean(final_binary_slot_precision)
     final_binary_slot_F1 = 2 * final_R * final_P / (final_R + final_P)
+    if np.isnan(final_binary_slot_F1):
+        final_binary_slot_F1 = 0
 
     R = np.mean(binary_slot_recall)
     P = np.mean(binary_slot_precision)

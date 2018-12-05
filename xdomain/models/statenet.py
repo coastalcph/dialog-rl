@@ -281,6 +281,7 @@ class StateNet(nn.Module):
         self.logger = self.get_train_logger()
         self.logger.setLevel(logging.INFO)
         self.logger.info(args)
+        self.set_optimizer()
 
     def set_epochs_trained(self, e):
         self.epochs_trained = e
@@ -391,14 +392,15 @@ class StateNet(nn.Module):
                 # 1 if slot in turn.labels (meaning it's filled), 0 else
                 gold_slot_filling = torch.Tensor(
                     [float(slot_id in turn.labels)]).to(self.device)
-                try:
+                if binary_filling_probs:
+                    #print(slot_id, binary_filling_probs[slot_id], gold_slot_filling)
                     loss += self.args.eta * F.binary_cross_entropy(
                         binary_filling_probs[slot_id],
                         gold_slot_filling).to(self.device)
-                except RuntimeError:
+                else:
                     print(slot_id, binary_filling_probs[slot_id], gold_slot_filling)
                     print(DEBUG)
-                    raise RuntimeError
+                    #raise RuntimeError
                 loss_updates += 1
                 if slot_id in turn.labels and \
                         binary_filling_probs[slot_id] > 0.5:
@@ -531,6 +533,7 @@ class StateNet(nn.Module):
             track.clear()
 
     def run_train_reinforce(self, dialogs_train, dialogs_dev, s2v, args):
+        nn.utils.clip_grad_norm(self.parameters(), 5)
         track = defaultdict(list)
         if self.optimizer is None:
             self.set_optimizer()
@@ -559,9 +562,14 @@ class StateNet(nn.Module):
                     self.forward(dialog, s2v)
                 train_predictions.append((predictions, _))
 
-                dialog_reward = evaluate_preds(
-                    [dialog], [predictions], [[]], args.eval_domains
-                )['final_binary_slot_f1']
+                eval_scores = evaluate_preds([dialog], [predictions], [_], 
+                                             args.eval_domains)
+                #dialog_reward = eval_scores['final_binary_slot_f1'] + eval_scores['joint_goal']
+                dialog_reward = eval_scores['final_binary_slot_f1']
+                #print(">>> DIALOG REWARD:", dialog_reward)
+                #if np.isnan(dialog_reward):
+                #    dialog_reward = 0
+                #    print(">>>    new DIALOG REWARD:", dialog_reward)
                 for s, slot in enumerate(scores):
                     for t in range(len(scores[slot])):
                         slot_turn_scores = F.softmax(scores[slot][t])
@@ -572,6 +580,7 @@ class StateNet(nn.Module):
                         # credit assignment: copy dialog-level reward to each
                         # slot/turn
                         dialog_rewards.append(dialog_reward)
+                        #print(dialog_rewards)
                         dialog_scores.append(slot_turn_prediction_log_prob)
 
                 # print(turn_predictions)
@@ -633,6 +642,8 @@ class StateNet(nn.Module):
 
         rewards = (rewards - rewards.mean()) / (rewards.std() + eps)
         for log_prob, reward in zip(log_probs, rewards):
+            if np.isnan(reward):
+                reward = 0
             policy_loss.append(-log_prob * reward)
             # policy_loss.append(-log_prob * (reward+0.001))
             # local_policy_loss = -log_prob * (reward+0.001)
@@ -641,12 +652,17 @@ class StateNet(nn.Module):
             # policy_loss.append(reward)
         self.optimizer.zero_grad()
         policy_loss = torch.stack(policy_loss).sum()
+        # print("-- POLICY LOSS --", policy_loss, type(policy_loss))
         # policy_loss = torch.autograd.Variable(policy_loss)
         # print(policy_loss)
         # policy_loss.backward(retain_graph=True)
-        if policy_loss > 0:
+        try:
             policy_loss.backward()
+            #for p in self.parameters():
+            #    p.data.add_(-self.args.lr, p.grad.data)
             self.optimizer.step()
+        except RuntimeError:
+            print("WARNING! couldn't update with policy loss:", policy_loss)
 
     def run_pred(self, dialogs, s2v):
         self.eval()
@@ -679,6 +695,10 @@ class StateNet(nn.Module):
         self.load_state_dict(state['model'])
         self.set_optimizer()
         self.optimizer.load_state_dict(state['optimizer'])
+        for state in self.optimizer.state.values():
+            for k, v in state.items():
+                if isinstance(v, torch.Tensor):
+                    state[k] = v.to(self.device)
         resume_from_epoch = state.get('epoch', 0)
         self.set_epochs_trained(resume_from_epoch)
         self.logger.info("Resuming from epoch {}".format(resume_from_epoch))

@@ -248,7 +248,7 @@ def run(args):
 
     model = model.to(model.device)
     for name, param in model.named_parameters():
-        print(name, param.device)
+        print(name, param.device, type(param))
 
     print("Training...")
     if args.reinforce:
