@@ -279,7 +279,7 @@ class StateNet(nn.Module):
         self.optimizer = None
         self.epochs_trained = 0
         self.logger = self.get_train_logger()
-        self.logger.setLevel(logging.INFO)
+        self.logger.setLevel(args.log_level.upper())
         self.logger.info(args)
         self.set_optimizer()
 
@@ -359,22 +359,29 @@ class StateNet(nn.Module):
         loss_updates = torch.Tensor([0]).to(self.device)
 
         DEBUG = ""
-
         # iterate over slots and values, compute probabilities
-        for slot_id, slot in slots2values.items():
+        for slot_id in sorted(slots2values.keys()):
+            slot = slots2values[slot_id]
             # compute encoding of inputs as described in StateNet paper, Sec. 2
             fs = self.slot_encoder(slot.embedding)
+
             if self.args.encode_sys_utt:
                 i = F.mul(fs, torch.cat((fu, fa, fy), 0))  # inputs encoding
             else:
                 i = F.mul(fs, torch.cat((fu, fa), 0))  # inputs encoding
+
             o, hidden = self.prediction_encoder(i, hidden)
+            if slot_id == "taxi-departure":
+                self.logger.debug([slot_id, i[-5:], o[0][-5:]])
 
             # get binary prediction for slot presence
             binary_filling_probs[slot_id] = torch.sigmoid(
                 self.slot_fill_indicator(o))
 
-            DEBUG = (binary_filling_probs[slot_id], fs, slot.embedding, self.slot_encoder.linear.weight)
+            DEBUG = (binary_filling_probs[slot_id], fs, slot.embedding,
+                     self.slot_encoder.linear.weight)
+
+            # self.logger.debug([hidden[-5:]])
 
             # get probability distribution over values...
             values = slot.values
@@ -384,6 +391,7 @@ class StateNet(nn.Module):
                     venc = self.value_encoder(value.embedding)
                     # ... by computing 2-Norm distance following paper, Sec. 2.6
                     probs[slot_id][v] = -torch.dist(o, venc)
+
                 probs[slot_id] = F.softmax(probs[slot_id], 0)  # softmax it!
 
         loss = torch.Tensor([0]).to(self.device)

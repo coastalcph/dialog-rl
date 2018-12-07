@@ -261,6 +261,8 @@ def run(args):
         results = model.run_eval(data_featurized["test"], s2v,
                                  args.eval_domains, args.outfile)
         print(results)
+        print(list(model.parameters())[0].data[-5:])
+        print(data_featurized["test"][0].turns[1].x_act[-5:])
     elif args.pred:
         raise NotImplementedError
         # model.run_predict(data_featurized["test"], s2v, args)
@@ -298,6 +300,8 @@ def get_args():
     parser.add_argument('--seed', default=42, help='random seed', type=int)
     parser.add_argument('--test', action='store_true',
                         help='run in evaluation only mode')
+    parser.add_argument('--pred', action='store_true',
+                        help='run in prediction only mode')
     parser.add_argument('--gpu', type=int, help='which GPU to use')
     parser.add_argument('--dropout', nargs='*', help='dropout rates',
                         default=['emb=0.2', 'local=0.2', 'global=0.2'])
@@ -340,6 +344,8 @@ def get_args():
                         help='number of receptors per n-gram', type=int)
     parser.add_argument('--M', default=3, help='max n-gram size', type=int)
     parser.add_argument('--outfile', help='output file for test')
+    parser.add_argument('--log_level', help='log level. default is info',
+                        default="info")
 
     _args = parser.parse_args()
     _args.dout = os.path.join(_args.dexp, _args.model, _args.nick)
