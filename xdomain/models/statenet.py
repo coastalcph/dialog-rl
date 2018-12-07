@@ -341,6 +341,8 @@ class StateNet(nn.Module):
         probs = {}
         binary_filling_probs = {}
 
+        # TODO move all embeddings to device offline (in preprocessing)
+
         # Encode user and action representations
         if self.args.elmo:
             utt = turn.x_utt.to(self.device)
@@ -683,6 +685,8 @@ class StateNet(nn.Module):
         return predictions
 
     def run_eval(self, dialogs, s2v, eval_domains, outfile):
+        if torch.cuda.is_available() and self.device.type == 'cuda':
+            s2v = self.s2v_to_device(s2v)
         predictions, turn_predictions = zip(*self.run_pred(dialogs, s2v))
         return evaluate_preds(dialogs, predictions, turn_predictions,
                               eval_domains, outfile)

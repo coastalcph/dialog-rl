@@ -261,18 +261,16 @@ def run(args):
         results = model.run_eval(data_featurized["test"], s2v,
                                  args.eval_domains, args.outfile)
         print(results)
-        print(list(model.parameters())[0].data[-5:])
-        print(data_featurized["test"][0].turns[1].x_act[-5:])
     elif args.pred:
         raise NotImplementedError
         # model.run_predict(data_featurized["test"], s2v, args)
     else:
         print("Training...")
         if args.reinforce:
-            model.run_train_reinforce(data_featurized["test"],
+            model.run_train_reinforce(data_featurized["train"],
                                       data_featurized["dev"], s2v, args)
         else:
-            model.run_train(data_featurized["test"], data_featurized["dev"],
+            model.run_train(data_featurized["train"], data_featurized["dev"],
                             s2v, args)
 
 
