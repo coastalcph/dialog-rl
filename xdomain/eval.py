@@ -105,3 +105,9 @@ def evaluate_preds(dialogs, preds, turn_predictions, eval_domains=None,
                 'binary_slot_r': R,
                 'binary_slot_f1': binary_slot_F1
             }
+
+def shape_reward(reward, scale_in=(0, 1), scale_out=(-2, 2), continuous=False):
+    scaled = (reward - scale_in[0]) / (scale_in[1] - scale_in[0]) * (scale_out[1] - scale_in[0]) + scale_out[0]
+    if not continuous:
+        scaled = round(scaled)
+    return scaled
