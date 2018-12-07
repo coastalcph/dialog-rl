@@ -11,7 +11,7 @@ import numpy as np
 from tqdm import tqdm
 from collections import defaultdict
 from pprint import pformat
-from eval import evaluate_preds
+from eval import evaluate_preds, shape_reward
 from collections import namedtuple
 
 # TODO refactor such that encoder classes are declared within StateNet, allows
@@ -567,6 +567,8 @@ class StateNet(nn.Module):
                 #dialog_reward = eval_scores['final_binary_slot_f1'] + eval_scores['joint_goal']
                 dialog_reward = eval_scores['final_binary_slot_f1']
                 #print(">>> DIALOG REWARD:", dialog_reward)
+                dialog_reward = shape_reward(dialog_reward)
+                #print("    > shaped:", dialog_reward)
                 #if np.isnan(dialog_reward):
                 #    dialog_reward = 0
                 #    print(">>>    new DIALOG REWARD:", dialog_reward)
@@ -654,7 +656,7 @@ class StateNet(nn.Module):
         policy_loss = torch.stack(policy_loss).sum()
         # print("-- POLICY LOSS --", policy_loss, type(policy_loss))
         # policy_loss = torch.autograd.Variable(policy_loss)
-        # print(policy_loss)
+        #print(policy_loss)
         # policy_loss.backward(retain_graph=True)
         try:
             policy_loss.backward()
@@ -690,18 +692,18 @@ class StateNet(nn.Module):
         torch.save(state, fname)
 
     def load(self, path):
-        logging.info('loading model from {}'.format(path))
+        self.logger.info('loading model from {}'.format(path))
         state = torch.load(path)
         self.load_state_dict(state['model'])
         self.set_optimizer()
         self.optimizer.load_state_dict(state['optimizer'])
+        resume_from_epoch = state.get('epoch', 0)
+        self.set_epochs_trained(resume_from_epoch)
+        self.logger.info("Resuming from epoch {}".format(resume_from_epoch))
         for state in self.optimizer.state.values():
             for k, v in state.items():
                 if isinstance(v, torch.Tensor):
                     state[k] = v.to(self.device)
-        resume_from_epoch = state.get('epoch', 0)
-        self.set_epochs_trained(resume_from_epoch)
-        self.logger.info("Resuming from epoch {}".format(resume_from_epoch))
 
     def prune_saves(self, n_keep=5):
             scores_and_files = self.get_saves()
@@ -714,6 +716,7 @@ class StateNet(nn.Module):
             directory = self.args.dout
 
         scores_and_files = self.get_saves(directory=directory)
+        print(scores_and_files)
         if scores_and_files:
             assert scores_and_files, 'no saves exist at {}'.format(directory)
             score, fname = scores_and_files[0]

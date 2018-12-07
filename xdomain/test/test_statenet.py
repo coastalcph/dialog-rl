@@ -256,8 +256,6 @@ def run(args):
         model.load_best_save(directory=args.resume)
 
     model = model.to(model.device)
-    for name, param in model.named_parameters():
-        print(name, param.device, type(param))
 
     if args.test:
         results = model.run_eval(data_featurized["test"], s2v,
