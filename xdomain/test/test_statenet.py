@@ -106,7 +106,7 @@ def filter_dialogs(data, domains, strict, max_dialogs, max_turns_per_dialog):
             # strictly restricted to some domain(s), check that
             # dialog has no other domains
             if strict:
-                if not allowed_domains.issuperset(dialog_domains):
+                if not dialog_domains.issubset(allowed_domains):
                     continue
             # else, check there's at least one valid domain in the dialog
             else:
@@ -198,26 +198,33 @@ def run(args):
     print('Training on domains: ',  domains)
     print('Single-domain dialogues only?', strict)
 
-    data, ontology, vocab, w2v = util.load_dataset(splits=['train', 'dev'],
+    splits = ["train", "dev"]
+    if args.test or args.pred:
+        splits = ["test"]
+    data, ontology, vocab, w2v = util.load_dataset(splits=splits,
                                                    base_path=args.path)
+    all_data = []
+    data_filtered = {}
+    data_featurized = {}
 
-    data_dv = data['dev']
-    data_tr = data['train']
     s2v = ontology.values
     if args.delexicalize_labels:
         s2v = delexicalize(s2v)
 
-    data_tr = [dg.to_dict() for dg in data_tr.iter_dialogs()]
-    data_dv = [dg.to_dict() for dg in data_dv.iter_dialogs()]
-    random.shuffle(data_tr)
-
-    data_tr = filter_dialogs(data_tr, domains, strict, args.max_train_dialogs,
-                             args.max_dialog_length)
-    data_dv = filter_dialogs(data_dv, domains, strict, args.max_dev_dialogs,
-                             args.max_dialog_length)
+    # filter data for domains
+    for split in splits:
+        _data = [dg.to_dict() for dg in data[split].iter_dialogs()]
+        max_dialogs = {"train": args.max_train_dialogs,
+                       "dev": args.max_dev_dialogs}.get(split, -1)
+        data_filtered[split] = filter_dialogs(_data, domains, strict,
+                                              max_dialogs,
+                                              args.max_dialog_length)
+        if split == "train":
+            random.shuffle(data_filtered[split])
+        all_data.extend(data_filtered[split])
 
     print(len(s2v))
-    s2v = fix_s2v(s2v, data_tr + data_dv)
+    s2v = fix_s2v(s2v, all_data)
     print(s2v, len(s2v))
 
     if args.elmo:
@@ -236,11 +243,13 @@ def run(args):
     s2v = featurize_s2v(s2v, slot_featurizer, value_featurizer)
 
     print("Featurizing...")
-    data_f_tr = featurize_dialogs(data_tr, domains, strict, s2v, w2v, args)
-    data_f_dv = featurize_dialogs(data_dv, domains, strict, s2v, w2v, args)
-    # print(data_tr[0].to_dict()['turns'][0]['system_acts'])
+    for split in splits:
+        data_featurized[split] = featurize_dialogs(data_filtered[split],
+                                                   domains, strict, s2v,
+                                                   w2v, args)
 
-    DIM_INPUT = len(data_f_tr[0].turns[0].x_act)
+    key = list(data_featurized.keys())[0]
+    DIM_INPUT = len(data_featurized[key][0].turns[0].x_act)
     model = util.load_model(DIM_INPUT, DIM_INPUT, DIM_INPUT, DIM_INPUT,
                             DIM_HIDDEN_ENC, args.receptors, args)
     if args.resume:
@@ -250,11 +259,21 @@ def run(args):
     for name, param in model.named_parameters():
         print(name, param.device, type(param))
 
-    print("Training...")
-    if args.reinforce:
-        model.run_train_reinforce(data_f_tr, data_f_dv, s2v, args)
+    if args.test:
+        results = model.run_eval(data_featurized["test"], s2v,
+                                 args.eval_domains, args.outfile)
+        print(results)
+    elif args.pred:
+        raise NotImplementedError
+        # model.run_predict(data_featurized["test"], s2v, args)
     else:
-        model.run_train(data_f_tr, data_f_dv, s2v, args)
+        print("Training...")
+        if args.reinforce:
+            model.run_train_reinforce(data_featurized["test"],
+                                      data_featurized["dev"], s2v, args)
+        else:
+            model.run_train(data_featurized["test"], data_featurized["dev"],
+                            s2v, args)
 
 
 def get_args():
@@ -322,6 +341,7 @@ def get_args():
     parser.add_argument('--receptors', default=3,
                         help='number of receptors per n-gram', type=int)
     parser.add_argument('--M', default=3, help='max n-gram size', type=int)
+    parser.add_argument('--outfile', help='output file for test')
 
     _args = parser.parse_args()
     _args.dout = os.path.join(_args.dexp, _args.model, _args.nick)

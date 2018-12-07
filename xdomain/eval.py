@@ -2,6 +2,10 @@ import numpy as np
 import json
 
 
+def zero_if_nan(n):
+    return 0 if np.isnan(n) else n
+
+
 def evaluate_preds(dialogs, preds, turn_predictions, eval_domains=None,
                    write_out=None):
     inform = []
@@ -95,7 +99,7 @@ def evaluate_preds(dialogs, preds, turn_predictions, eval_domains=None,
     P = np.mean(binary_slot_precision)
     binary_slot_F1 = 2*R*P / (R+P)
     joint_goal = inform
-    return {
+    out_dict = {
                 # 'turn_inform': np.mean(inform),
                 # 'turn_request': np.mean(request),
                 'joint_goal': np.mean(joint_goal),
@@ -105,3 +109,6 @@ def evaluate_preds(dialogs, preds, turn_predictions, eval_domains=None,
                 'binary_slot_r': R,
                 'binary_slot_f1': binary_slot_F1
             }
+
+    # fix NaNs
+    return {k: zero_if_nan(v) for k, v in out_dict.items()}
