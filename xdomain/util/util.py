@@ -6,6 +6,7 @@ from importlib import import_module
 from vocab import Vocab
 from util.dataset import Dataset, Ontology
 from util.preprocess_data import dann
+import torch
 # from models.statenet import StateNet
 
 
@@ -77,3 +78,12 @@ def split_on_uppercase(s, keep_contiguous=False):
     parts.append(s[start:])
 
     return parts
+
+
+def get_device(device_id):
+    if device_id is not None and torch.cuda.is_available():
+        num_gpus = torch.cuda.device_count()
+        gpu = device_id % num_gpus
+        return torch.device('cuda:{}'.format(gpu))
+    else:
+        return torch.device('cpu')
