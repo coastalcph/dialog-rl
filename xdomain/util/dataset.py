@@ -3,9 +3,18 @@ from collections import defaultdict
 import numpy as np
 from tqdm import tqdm
 from stanza.nlp.corenlp import CoreNLPClient
-
+from nltk import word_tokenize
+from pprint import pprint
 
 client = None
+
+sys_act_map = {'Dest': 'destination',
+               'Ref': 'reference',
+               '=': 'is',
+               'Addr': 'address',
+               '?': 'unknown',
+               'a': 'a'}
+
 
 
 def annotate(sent):
@@ -27,11 +36,31 @@ class Turn:
         self.turn_label = turn_label
         self.belief_state = belief_state
         self.system_acts = system_acts
-        self.system_transcript = system_transcript
+        self.system_transcript = word_tokenize(system_transcript)
         self.num = num or {}
 
-    def to_dict(self):
-        return {'turn_id': self.id, 'transcript': self.transcript, 'turn_label': self.turn_label, 'belief_state': self.belief_state, 'system_acts': self.system_acts, 'system_transcript': self.system_transcript, 'num': self.num}
+    def to_dict(self, elmo=False):
+        if elmo:
+            return {'turn_id': self.id,
+                    'transcript': self.transcript,
+                    'turn_label': self.turn_label,
+                    'belief_state': self.belief_state,
+                    'system_acts': self.system_acts,
+                    'system_transcript': self.system_transcript,
+                    'usr_trans_elmo': self.usr_trans_elmo,
+                    'usr_trans_elmo_pool': self.usr_trans_elmo_pool,
+                    'sys_trans_elmo': self.sys_trans_elmo,
+                    'sys_trans_elmo_pool': self.sys_trans_elmo_pool,
+                    'sys_acts_elmo': self.sys_acts_elmo,
+                    'sys_acts_elmo_pool': self.sys_acts_elmo_pool}
+        else:
+            return {'turn_id': self.id,
+                    'transcript': self.transcript,
+                    'turn_label': self.turn_label,
+                    'belief_state': self.belief_state,
+                    'system_acts': self.system_acts,
+                    'system_transcript': self.system_transcript}
+                    #, 'num': self.num}
 
     @classmethod
     def from_dict(cls, d):
@@ -63,25 +92,55 @@ class Turn:
 
 
 class Dialogue:
-    
-    def __init__(self, dialogue_id, turns, domain):
+
+    def __init__(self, dialogue_id, turns, domain, elmo=None):
         self.id = dialogue_id
         self.turns = turns
         self.domain = domain
-    
+        self.elmo = elmo
+
     def __len__(self):
         return len(self.turns)
-    
+
     def to_dict(self):
-        return { 'dialogue_id': self.id, 'turns': [t.to_dict() for t in self.turns],'domain': self.domain}
-    
+        return { 'dialogue_id': self.id, 'turns': [t.to_dict(elmo=self.elmo) for t in self.turns],'domain': self.domain}
+
+    def to_elmo(self, elmo):
+
+        self.elmo = True
+
+        utt, sys = elmo
+        usr_utts, sys_utts, sys_acts = [], [], []
+        for turn in self.turns:
+            # Fix system acts to more natural language
+            turn.system_acts = [[sys_act_map.get(t, t) for t in tu] tu for tu in turn.system_acts]
+
+            # Batch utterances and system acts
+            usr_utts.append(turn.transcript)
+            sys_utts.append(turn.system_transcript)
+            sys_acts.append(turn.system_acts)
+
+        # Featurize
+        usr_embs, pooled_usr = utt.featurize_batch(usr_utts)
+        sys_embs, pooled_sys = utt.featurize_batch(sys_utts)
+        sys_act_embs, sys_act_pooled = sys.featurize_batch(sys_acts)
+
+        # Add both list of ELMO embs for each token and a pooled one with different key
+        for i, turn in enumerate(self.turns):
+            setattr(turn, 'usr_trans_elmo', usr_embs[i])
+            setattr(turn, 'usr_trans_elmo_pool', pooled_usr[i])
+            setattr(turn, 'sys_trans_elmo', sys_embs[i])
+            setattr(turn, 'sys_trans_elmo_pool', pooled_sys[i])
+            setattr(turn, 'sys_acts_elmo', sys_act_embs[i])
+            setattr(turn, 'sys_acts_elmo_pool', sys_act_pooled[i])
+
     @classmethod
     def from_dict(cls, d):
-        return cls(d['dialogue_id'],[Turn.from_dict(t) for t in d['turns']], d['domain'])
-    
+        return cls(d['dialogue_id'], [Turn.from_dict(t) for t in d['turns']], d['domain'])
+
     @classmethod
     def annotate_raw(cls, raw):
-        return cls(raw['dialogue_idx'] ,[Turn.annotate_raw(t) for t in raw['dialogue']],raw['domain'])
+        return cls(raw['dialogue_idx'], [Turn.annotate_raw(t) for t in raw['dialogue']], raw['domain'])
 
 
 class Dataset:
@@ -101,12 +160,18 @@ class Dataset:
             for t in d.turns:
                 yield t
 
+    def to_elmo(self, elmo):
+        dialogues_elmo = []
+        for d in tqdm(self.dialogues, desc='Adding ELMo features'):
+            dialogues_elmo.append(d.to_elmo(elmo))
+        self.dialogues = dialogues_elmo
+
     def to_dict(self):
         return {'dialogues': [d.to_dict() for d in self.dialogues]}
 
     @classmethod
-    def from_dict(cls, d):
-        return cls([Dialogue.from_dict(dd) for dd in d['dialogues']])
+    def from_dict(cls, d, elmo=None):
+        return cls([Dialogue.from_dict(dd) for dd in tqdm(d['dialogues'])])
 
     @classmethod
     def annotate_raw(cls, fname):
@@ -124,7 +189,7 @@ class Dataset:
             for s, v in t.turn_label:
                 slots.add(s)
                 values[s].add(v.lower())
-        
+
         return Ontology(sorted(list(slots)), {k: sorted(list(v)) for k, v in values.items()})
 
 

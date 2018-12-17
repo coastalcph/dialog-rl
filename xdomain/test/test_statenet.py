@@ -171,7 +171,7 @@ def featurize_dialogs(_data, _domains, _strict, s2v, w2v, args):
 
             all_user_utts.append(utt)
             all_system_acts.append(act)
-            all_system_utts.append(sys.split())
+            all_system_utts.append(sys)
             all_ys.append(ys)
             all_lbls.append(lbls)
             all_bsts.append(bst)

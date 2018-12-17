@@ -96,12 +96,14 @@ class ElmoFeaturizer(Featurizer):
         super().__init__()
         self.elmo = elmo
         self.mode = mode
+        self.map = self.system_act_mapping()
 
     def featurize_turn(self, turn):
         if self.mode == "utterance":
             turn = ["<bos>"] + turn + ["<eos>"]
         elif self.mode == "act":
             turn = [item for sublist in turn for item in sublist]
+            turn = self.clean_act(turn)
         elif self.mode in ["slot", "value"]:
             turn = [turn]
         # get elmo embeddings
@@ -109,19 +111,52 @@ class ElmoFeaturizer(Featurizer):
             turn = [["<NIL>"]]
         e_toks = self.elmo.batch_to_embeddings(turn)[0][0]
 
+        # Sequence of elmo embeddings with all 3 layers concatenated for each token
+        tok_embs = torch.cat((e_toks[0, :, :],
+                              e_toks[1, :, :],
+                              e_toks[2, :, :]),
+                              dim=1)
+
         # max over tokens & flatten
-        return torch.max(e_toks, dim=1)[0].view(-1)
+        pooled = torch.max(e_toks, dim=1)[0].view(-1)
+
+        return tok_embs, pooled
 
     def featurize_batch(self, batch):
         if self.mode == "utterance":
             batch = [["<bos>"] + turn + ["<eos>"] for turn in batch]
         elif self.mode == "act":
-            batch = [[item for sublist in turn for item in sublist] for turn in batch]
+            batch = [self.clean_act([item for sublist in turn for item in sublist]) for turn in batch]
+            print(batch[:2])
+            input()
         # elif self.mode in ["slot", "value"]:
         #     batch = [[turn] for turn in batch]
-        E = self.elmo.batch_to_embeddings(batch)[0]
-        E = torch.max(E, dim=2)[0].view(len(batch), -1)
-        return E
+
+        e_toks = self.elmo.batch_to_embeddings(batch)[0]
+
+        # Sequence of elmo embeddings with all 3 layers concatenated for each token
+        tok_embs = torch.cat((e_toks[:, 0, :, :],
+                              e_toks[:, 1, :, :],
+                              e_toks[:, 2, :, :]),
+                              dim=2)
+        # max over tokens & flatten
+        pooled = torch.max(e_toks, dim=2)[0].view(len(batch), -1)
+
+        return tok_embs, pooled
+
+    def clean_act(self, turn):
+        turn = [self.map.get(item, item) for item in turn]
+        turn = ["<bos>"] + turn + ["<eos>"]
+        return turn
+
+    def system_act_mapping(self):
+        mapping = {'Dest': 'destination',
+                   'Ref': 'reference',
+                   '=': 'is',
+                   'Addr': 'address',
+                   '?': 'unknown',
+                   'a': 'a'}
+        return mapping
 
 
 class UserInputNgramFeaturizer(Featurizer):
