@@ -12,7 +12,6 @@ from allennlp.commands.elmo import ElmoEmbedder
 DIM_HIDDEN_LSTM = 128
 DIM_HIDDEN_ENC = 128
 
-
 def delexicalize(s2v):
     allowed_slots = [
         "attraction-area",
@@ -74,7 +73,7 @@ def fix_s2v(_s2v, dialogs):
     return s2v_new
 
 
-def featurize_s2v(s2v_dict, slot_featurizer, value_featurizer):
+def featurize_s2v(s2v_dict, slot_featurizer, value_featurizer, device):
     out = {}
     print("Featurizing slots and values...")
     for s, vs in tqdm(s2v_dict.items()):
@@ -84,9 +83,9 @@ def featurize_s2v(s2v_dict, slot_featurizer, value_featurizer):
         words = util.split_on_uppercase(slot, keep_contiguous=True)
         slot_emb = slot_featurizer.featurize_turn(words)
         v_embs = value_featurizer.featurize_batch([v.split() for v in vs])
-        vs_out = [Value(v, v_embs[idx], idx)
+        vs_out = [Value(v, v_embs[idx].to(device), idx)
                   for idx, v in enumerate(vs)]
-        out[s] = Slot(domain, slot_emb, vs_out)
+        out[s] = Slot(domain, slot_emb.to(device), vs_out)
     return out
 
 
@@ -119,7 +118,7 @@ def filter_dialogs(data, domains, strict, max_dialogs, max_turns_per_dialog):
     return out
 
 
-def featurize_dialogs(_data, _domains, _strict, s2v, w2v, args):
+def featurize_dialogs(_data, _domains, _strict, s2v, w2v, device, args):
     featurized_dialogs = []
 
     def get_value_index(_values, _val):
@@ -181,9 +180,21 @@ def featurize_dialogs(_data, _domains, _strict, s2v, w2v, args):
         all_x_sys = sys_ftz.featurize_batch(all_system_utts)
 
         for i in range(len(dg['turns'])):
+
+            # Encode user and action representations
+            if args.elmo:
+                x_utt = all_x_utt[i].to(device)
+                x_sys = all_x_sys[i].to(device)
+            else:
+                x_utt = [t.to(device) for t in
+                         all_x_utt[i]]  # one vector per n
+                x_sys = [t.to(device) for t in
+                         all_x_sys[i]]  # one vector per n
+            x_act = all_x_act[i].to(device)
+
             featurized_turns.append(Turn(
                 all_user_utts[i], all_system_acts[i], all_system_utts[i],
-                all_x_utt[i], all_x_act[i], all_x_sys[i],
+                x_utt, x_act, x_sys,
                 all_ys[i], all_lbls[i], all_bsts[i]))
 
         featurized_dialogs.append(Dialog(featurized_turns))
@@ -193,6 +204,7 @@ def featurize_dialogs(_data, _domains, _strict, s2v, w2v, args):
 
 def run(args):
     print(args)
+    device = util.get_device(args.gpu)
     domains = args.train_domains
     strict = args.train_strict
     print('Training on domains: ',  domains)
@@ -240,13 +252,13 @@ def run(args):
     else:
         slot_featurizer = SlotFeaturizer(w2v)
         value_featurizer = ValueFeaturizer(w2v)
-    s2v = featurize_s2v(s2v, slot_featurizer, value_featurizer)
+    s2v = featurize_s2v(s2v, slot_featurizer, value_featurizer, device)
 
     print("Featurizing...")
     for split in splits:
         data_featurized[split] = featurize_dialogs(data_filtered[split],
                                                    domains, strict, s2v,
-                                                   w2v, args)
+                                                   w2v, device, args)
 
     key = list(data_featurized.keys())[0]
     DIM_INPUT = len(data_featurized[key][0].turns[0].x_act)
@@ -255,7 +267,7 @@ def run(args):
     if args.resume:
         model.load_best_save(directory=args.resume)
 
-    model = model.to(model.device)
+    model = model.to(device)
 
     if args.test:
         results = model.run_eval(data_featurized["test"], s2v,

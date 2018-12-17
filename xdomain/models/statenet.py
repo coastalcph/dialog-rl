@@ -13,6 +13,7 @@ from collections import defaultdict
 from pprint import pformat
 from eval import evaluate_preds, shape_reward
 from collections import namedtuple
+from util import util
 
 # TODO refactor such that encoder classes are declared within StateNet, allows
 # for better modularization and sharing of instances/variables such as
@@ -250,7 +251,7 @@ class StateNet(nn.Module):
 
         self.hidden_dim = hidden_dim
         self.args = args
-        self.device = self.get_device()
+        self.device = util.get_device(args.gpu)
 
         if args.encode_sys_utt:
             slot_hidden_dim = 3 * hidden_dim
@@ -269,12 +270,14 @@ class StateNet(nn.Module):
             self.utt_enc = MultiScaleReceptorsModule(a_in_dim, hidden_dim,
                                                      receptors, n)
         self.action_encoder = ActionEncoder(a_in_dim, hidden_dim)
-        self.slot_encoder = SlotEncoder(input_slot_dim, slot_hidden_dim,
+        self.slot_encoder = SlotEncoder(input_slot_dim, hidden_dim,
                                         self.device)
         self.value_encoder = ValueEncoder(input_value_dim, hidden_dim,
                                           self.device)
-        self.prediction_encoder = PredictionEncoder(slot_hidden_dim,
-                                                    hidden_dim, hidden_dim)
+        # self.prediction_encoder = PredictionEncoder(slot_hidden_dim,
+        #                                             hidden_dim, hidden_dim)
+        self.turn_history_rnn = PredictionEncoder(slot_hidden_dim, hidden_dim,
+                                                  hidden_dim)
         self.slot_fill_indicator = nn.Linear(hidden_dim, 1)
         self.optimizer = None
         self.epochs_trained = 0
@@ -300,15 +303,6 @@ class StateNet(nn.Module):
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
         return logger
-
-    # @property
-    def get_device(self):
-        if self.args.gpu is not None and torch.cuda.is_available():
-            num_gpus = torch.cuda.device_count()
-            gpu = self.args.gpu % num_gpus
-            return torch.device('cuda:{}'.format(gpu))
-        else:
-            return torch.device('cpu')
 
     def embed(self, w, numpy=False):
         e = self.embeddings.get(w)
@@ -341,49 +335,29 @@ class StateNet(nn.Module):
         probs = {}
         binary_filling_probs = {}
 
-        # TODO move all embeddings to device offline (in preprocessing)
+        fu = self.utt_enc(turn.x_utt)  # user input encoding
+        fa = self.action_encoder(turn.x_act)  # action input encoding
 
-        # Encode user and action representations
-        if self.args.elmo:
-            utt = turn.x_utt.to(self.device)
-            sys = turn.x_sys.to(self.device)
-        else:
-            utt = [t.to(self.device) for t in turn.x_utt]  # one vector per n
-            sys = [t.to(self.device) for t in turn.x_sys]  # one vector per n
-        act = turn.x_act.to(self.device)
-
-        fu = self.utt_enc(utt)  # user input encoding
-        fa = self.action_encoder(act)  # action input encodingdebug
-        fy = None
         if self.args.encode_sys_utt:
-            fy = self.utt_enc(sys)
+            fy = self.utt_enc(turn.x_sys)
+            f_turn_inputs = torch.cat((fu, fa, fy), 0)
+        else:
+            f_turn_inputs = torch.cat((fu, fa), 0)
+
+        f_turn, hidden = self.turn_history_rnn(f_turn_inputs, hidden)
 
         loss_updates = torch.Tensor([0]).to(self.device)
 
-        DEBUG = ""
         # iterate over slots and values, compute probabilities
         for slot_id in sorted(slots2values.keys()):
             slot = slots2values[slot_id]
             # compute encoding of inputs as described in StateNet paper, Sec. 2
             fs = self.slot_encoder(slot.embedding)
-
-            if self.args.encode_sys_utt:
-                i = F.mul(fs, torch.cat((fu, fa, fy), 0))  # inputs encoding
-            else:
-                i = F.mul(fs, torch.cat((fu, fa), 0))  # inputs encoding
-
-            o, hidden = self.prediction_encoder(i, hidden)
-            if slot_id == "taxi-departure":
-                self.logger.debug([slot_id, i[-5:], o[0][-5:]])
+            f_slot_turn = F.mul(fs, f_turn)
 
             # get binary prediction for slot presence
             binary_filling_probs[slot_id] = torch.sigmoid(
-                self.slot_fill_indicator(o))
-
-            DEBUG = (binary_filling_probs[slot_id], fs, slot.embedding,
-                     self.slot_encoder.linear.weight)
-
-            # self.logger.debug([hidden[-5:]])
+                self.slot_fill_indicator(f_slot_turn))
 
             # get probability distribution over values...
             values = slot.values
@@ -392,26 +366,25 @@ class StateNet(nn.Module):
                 for v, value in enumerate(values):
                     venc = self.value_encoder(value.embedding)
                     # ... by computing 2-Norm distance following paper, Sec. 2.6
-                    probs[slot_id][v] = -torch.dist(o, venc)
+                    probs[slot_id][v] = -torch.dist(f_slot_turn, venc)
 
                 probs[slot_id] = F.softmax(probs[slot_id], 0)  # softmax it!
 
         loss = torch.Tensor([0]).to(self.device)
         if self.training:
             for slot_id in slots2values.keys():
-                # 1 if slot in turn.labels (meaning it's filled), 0 else
+
+                # loss for binary slot presence
+                # gold: 1 if slot in turn.labels (meaning it's filled), else 0
                 gold_slot_filling = torch.Tensor(
                     [float(slot_id in turn.labels)]).to(self.device)
                 if binary_filling_probs:
-                    #print(slot_id, binary_filling_probs[slot_id], gold_slot_filling)
                     loss += self.args.eta * F.binary_cross_entropy(
                         binary_filling_probs[slot_id],
                         gold_slot_filling).to(self.device)
-                else:
-                    print(slot_id, binary_filling_probs[slot_id], gold_slot_filling)
-                    print(DEBUG)
-                    #raise RuntimeError
-                loss_updates += 1
+                    loss_updates += 1
+
+                # loss for slot-value pairing, if slot is present
                 if slot_id in turn.labels and \
                         binary_filling_probs[slot_id] > 0.5:
                     loss += F.binary_cross_entropy(
