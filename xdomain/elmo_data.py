@@ -40,5 +40,10 @@ def main():
     for split in splits:
         json.dump(dia_data[split], open('{}_elmo.json'.format(base_path + split)))
 
+    ## Create s2v embedding
+    _s2v = {}
+    # Save s2v
+    json.dump(_s2v, open('{}_elmo.json'.format(base_path)))
+
 if __name__ == '__main__':
     main()

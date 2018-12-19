@@ -12,82 +12,6 @@ from allennlp.commands.elmo import ElmoEmbedder
 DIM_HIDDEN_LSTM = 128
 DIM_HIDDEN_ENC = 128
 
-def delexicalize(s2v):
-    allowed_slots = [
-        "attraction-area",
-        "attraction-name",
-        "attraction-type",
-        "hotel-area",
-        "hotel-day",
-        "hotel-internet",
-        "hotel-name",
-        "hotel-parking",
-        "hotel-people",
-        "hotel-pricerange",
-        "hotel-stars",
-        "hotel-stay",
-        "hotel-type",
-        "restaurant-area",
-        "restaurant-day",
-        "restaurant-food",
-        "restaurant-name",
-        "restaurant-people",
-        "restaurant-pricerange",
-        "restaurant-time",
-        "taxi-arriveBy",
-        "taxi-leaveAt",
-        "taxi-type",
-        "train-arriveBy",
-        "train-day",
-        "train-leaveAt",
-        "train-people"]
-    out = {}
-    for s, v in s2v.items():
-        if s in allowed_slots:
-            out[s] = v
-        else:
-            out[s] = ["<true>"]
-    return out
-
-
-def str2bool(v):
-    if v.lower() in ('yes', 'true', 't', 'y', '1'):
-        return True
-    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
-        return False
-    else:
-        raise argparse.ArgumentTypeError('Boolean value expected.')
-
-
-def fix_s2v(_s2v, dialogs):
-    all_slots = set()
-    s2v_new = {}
-    for d in dialogs:
-        for t in d['turns']:
-            for s, v in t['turn_label']:
-                all_slots.add(s)
-
-    for s in all_slots:
-        s2v_new[s] = _s2v[s]
-
-    return s2v_new
-
-
-def featurize_s2v(s2v_dict, slot_featurizer, value_featurizer, device):
-    out = {}
-    print("Featurizing slots and values...")
-    for s, vs in tqdm(s2v_dict.items()):
-        # remove domain prefix ('restaurant-priceRange' -> 'priceRange')
-        domain, slot = s.split("-", 1)
-        # split at uppercase to get vectors ('priceRange' -> ['price', 'range'])
-        words = util.split_on_uppercase(slot, keep_contiguous=True)
-        slot_emb = slot_featurizer.featurize_turn(words)
-        v_embs = value_featurizer.featurize_batch([v.split() for v in vs])
-        vs_out = [Value(v, v_embs[idx].to(device), idx)
-                  for idx, v in enumerate(vs)]
-        out[s] = Slot(domain, slot_emb.to(device), vs_out)
-    return out
-
 
 def filter_dialogs(data, domains, strict, max_dialogs, max_turns_per_dialog):
     out = []
@@ -221,7 +145,7 @@ def run(args):
 
     s2v = ontology.values
     if args.delexicalize_labels:
-        s2v = delexicalize(s2v)
+        s2v = util.delexicalize(s2v)
 
     # filter data for domains
     for split in splits:
@@ -236,7 +160,7 @@ def run(args):
         all_data.extend(data_filtered[split])
 
     print(len(s2v))
-    s2v = fix_s2v(s2v, all_data)
+    s2v = util.fix_s2v(s2v, all_data)
     print(s2v, len(s2v))
 
     if args.elmo:
@@ -252,7 +176,7 @@ def run(args):
     else:
         slot_featurizer = SlotFeaturizer(w2v)
         value_featurizer = ValueFeaturizer(w2v)
-    s2v = featurize_s2v(s2v, slot_featurizer, value_featurizer, device)
+    s2v = util.featurize_s2v(s2v, slot_featurizer, value_featurizer, device)
 
     print("Featurizing...")
     for split in splits:
