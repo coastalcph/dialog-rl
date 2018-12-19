@@ -113,7 +113,7 @@ class Dialogue:
         usr_utts, sys_utts, sys_acts = [], [], []
         for turn in self.turns:
             # Fix system acts to more natural language
-            turn.system_acts = [[sys_act_map.get(t, t) for t in tu] tu for tu in turn.system_acts]
+            turn.system_acts = [[sys_act_map.get(t, t) for t in tu] for tu in turn.system_acts]
 
             # Batch utterances and system acts
             usr_utts.append(turn.transcript)

@@ -11,7 +11,7 @@ import torch
 
 
 def load_dataset(splits=('train', 'dev', 'test'), domains='all', strict=False,
-                 base_path=None):
+                 base_path=None, elmo=False):
     """
 
     :param splits:
@@ -40,7 +40,7 @@ def load_dataset(splits=('train', 'dev', 'test'), domains='all', strict=False,
     logging.info('dataset sizes: {}'.format(pformat({k: len(v) for k, v in dataset.items()})))
     return dataset, ontology, vocab, w2v
 
-def load_dataset_elmo(elmo, splits=('train', 'dev', 'test'), domains='all', strict=False,
+def generate_dataset_elmo(elmo, splits=('train', 'dev', 'test'), domains='all', strict=False,
                       base_path=None):
     """
     """

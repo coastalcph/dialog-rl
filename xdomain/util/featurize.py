@@ -127,8 +127,6 @@ class ElmoFeaturizer(Featurizer):
             batch = [["<bos>"] + turn + ["<eos>"] for turn in batch]
         elif self.mode == "act":
             batch = [self.clean_act([item for sublist in turn for item in sublist]) for turn in batch]
-            print(batch[:2])
-            input()
         # elif self.mode in ["slot", "value"]:
         #     batch = [[turn] for turn in batch]
 
@@ -145,7 +143,7 @@ class ElmoFeaturizer(Featurizer):
         return tok_embs, pooled
 
     def clean_act(self, turn):
-        turn = [self.map.get(item, item) for item in turn]
+        #turn = [self.map.get(item, item) for item in turn]
         turn = ["<bos>"] + turn + ["<eos>"]
         return turn
 

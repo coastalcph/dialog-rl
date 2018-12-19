@@ -34,7 +34,7 @@ def main():
 
     elmo = Elmo(utterance_featurizer, sys_act_featurizer)
 
-    dia_data = util.load_dataset_elmo(elmo, splits=splits, base_path=base_path)
+    dia_data = util.generate_dataset_elmo(elmo, splits=splits, base_path=base_path)
 
     # Save dataset
     for split in splits:
