@@ -7,6 +7,7 @@ from util.featurize import ElmoFeaturizer
 from collections import namedtuple
 
 Elmo = namedtuple('Elmo', ['utterance_feat', 'sys_act_feat'])
+DELEX = True
 
 def main():
     # Init ELMO model
@@ -25,7 +26,8 @@ def main():
         _ = elmo_emb.batch_to_embeddings(utts)
 
     base_path = '../data/multiwoz/ann/'
-    splits = ['train', 'test', 'dev']
+    #splits = ['train', 'test', 'dev']
+    splits = ['dev']
 
     # Load dialogs
     print('Creating elmo embeddings for annotated data')
@@ -34,16 +36,25 @@ def main():
 
     elmo = Elmo(utterance_featurizer, sys_act_featurizer)
 
-    dia_data = util.generate_dataset_elmo(elmo, splits=splits, base_path=base_path)
+    dia_data, ontology = util.generate_dataset_elmo(elmo, splits=splits, base_path=base_path)
 
     # Save dataset
     for split in splits:
         json.dump(dia_data[split], open('{}_elmo.json'.format(base_path + split)))
 
     ## Create s2v embedding
-    _s2v = {}
+    s2v = ontology.values
+    if DELEX:
+        s2v = util.delexicalize(s2v)
+    s2v = util.fix_s2v(s2v, dia_data, splits=splits)
+
+    slot_featurizer = ElmoFeaturizer(elmo_emb, "slot")
+    value_featurizer = ElmoFeaturizer(elmo_emb, "value")
+
+    s2v = util.featurize_s2v(s2v, slot_featurizer, value_featurizer)
+
     # Save s2v
-    json.dump(_s2v, open('{}_elmo.json'.format(base_path)))
+    json.dump(s2v, open('{}s2v_elmo.json'.format(base_path)))
 
 if __name__ == '__main__':
     main()

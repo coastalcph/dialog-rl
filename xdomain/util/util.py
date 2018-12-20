@@ -100,15 +100,6 @@ def split_on_uppercase(s, keep_contiguous=False):
     return parts
 
 
-def get_device(device_id):
-    if device_id is not None and torch.cuda.is_available():
-        num_gpus = torch.cuda.device_count()
-        gpu = device_id % num_gpus
-        return torch.device('cuda:{}'.format(gpu))
-    else:
-        return torch.device('cpu')
-
-
 def delexicalize(s2v):
     allowed_slots = [
         "attraction-area",
@@ -156,13 +147,14 @@ def str2bool(v):
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
 
-def fix_s2v(_s2v, dialogs):
+def fix_s2v(_s2v, dialogs, splits=['train', 'dev', 'test']):
     all_slots = set()
     s2v_new = {}
-    for d in dialogs:
-        for t in d['turns']:
-            for s, v in t['turn_label']:
-                all_slots.add(s)
+    for s in splits:
+        for d in dialogs[s]:
+            for t in d['turns']:
+                for s, v in t['turn_label']:
+                    all_slots.add(s)
 
     for s in all_slots:
         s2v_new[s] = _s2v[s]
@@ -170,7 +162,7 @@ def fix_s2v(_s2v, dialogs):
     return s2v_new
 
 
-def featurize_s2v(s2v_dict, slot_featurizer, value_featurizer, device):
+def featurize_s2v(s2v_dict, slot_featurizer, value_featurizer):
     out = {}
     print("Featurizing slots and values...")
     for s, vs in tqdm(s2v_dict.items()):
@@ -180,9 +172,18 @@ def featurize_s2v(s2v_dict, slot_featurizer, value_featurizer, device):
         words = split_on_uppercase(slot, keep_contiguous=True)
         slot_emb = slot_featurizer.featurize_turn(words)
         v_embs = value_featurizer.featurize_batch([v.split() for v in vs])
-        vs_out = [Value(v, v_embs[idx].to(device), idx)
+        vs_out = [Value(v, v_embs[idx], idx)
                   for idx, v in enumerate(vs)]
-        out[s] = Slot(domain, slot_emb.to(device), vs_out)
+        out[s] = Slot(domain, slot_emb, vs_out)
+    return out
+
+
+def s2v_to_device(s2v, device):
+    out = {}
+    for s, vs in s2v.items():
+        dom, slot_emb, vs_out = s2v[s]
+        vs_out = [Value(v, v_emb.to(device), idx) for v, v_emb, idx in vs_out]
+        out[s] = Slot(dom, slot_emb.to(device), vs_out)
     return out
 
 
@@ -214,4 +215,12 @@ def filter_dialogs(data, domains, strict, max_dialogs, max_turns_per_dialog):
         out = out[:max_dialogs]
     return out
 
+
+def get_device(device_id):
+    if device_id is not None and torch.cuda.is_available():
+        num_gpus = torch.cuda.device_count()
+        gpu = device_id % num_gpus
+        return torch.device('cuda:{}'.format(gpu))
+    else:
+        return torch.device('cpu')
 

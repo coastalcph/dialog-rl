@@ -13,35 +13,6 @@ DIM_HIDDEN_LSTM = 128
 DIM_HIDDEN_ENC = 128
 
 
-def filter_dialogs(data, domains, strict, max_dialogs, max_turns_per_dialog):
-    out = []
-    for dg in data:
-        if len(dg['turns']) > max_turns_per_dialog > 0:
-            continue
-
-        # # # Check domain constraints # # #
-        # if 'all' in domains, don't worry about anything, else
-        # check how allowed domains and dialog domain intersect
-        if 'all' not in domains:
-            dialog_domains = set(dg['domain'])
-            allowed_domains = set(domains)
-
-            # strictly restricted to some domain(s), check that
-            # dialog has no other domains
-            if strict:
-                if not dialog_domains.issubset(allowed_domains):
-                    continue
-            # else, check there's at least one valid domain in the dialog
-            else:
-                if not allowed_domains.intersection(dialog_domains):
-                    continue
-        out.append(dg)
-
-    if max_dialogs > 0:
-        out = out[:max_dialogs]
-    return out
-
-
 def featurize_dialogs(_data, _domains, _strict, s2v, w2v, device, args):
     featurized_dialogs = []
 
@@ -139,7 +110,7 @@ def run(args):
         splits = ["test"]
     data, ontology, vocab, w2v = util.load_dataset(splits=splits,
                                                    base_path=args.path)
-    all_data = []
+    #all_data = []
     data_filtered = {}
     data_featurized = {}
 
@@ -152,15 +123,15 @@ def run(args):
         _data = [dg.to_dict() for dg in data[split].iter_dialogs()]
         max_dialogs = {"train": args.max_train_dialogs,
                        "dev": args.max_dev_dialogs}.get(split, -1)
-        data_filtered[split] = filter_dialogs(_data, domains, strict,
-                                              max_dialogs,
-                                              args.max_dialog_length)
+        data_filtered[split] = util.filter_dialogs(_data, domains, strict,
+                                                   max_dialogs,
+                                                   args.max_dialog_length)
         if split == "train":
             random.shuffle(data_filtered[split])
-        all_data.extend(data_filtered[split])
+        #all_data.extend(data_filtered[split])
 
     print(len(s2v))
-    s2v = util.fix_s2v(s2v, all_data)
+    s2v = util.fix_s2v(s2v, data_filtered, splits=splits)
     print(s2v, len(s2v))
 
     if args.elmo:
@@ -176,7 +147,8 @@ def run(args):
     else:
         slot_featurizer = SlotFeaturizer(w2v)
         value_featurizer = ValueFeaturizer(w2v)
-    s2v = util.featurize_s2v(s2v, slot_featurizer, value_featurizer, device)
+    s2v = util.featurize_s2v(s2v, slot_featurizer, value_featurizer)
+    s2v = util.s2v_to_device(s2v, device)
 
     print("Featurizing...")
     for split in splits:
