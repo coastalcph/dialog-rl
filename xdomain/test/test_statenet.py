@@ -13,25 +13,93 @@ DIM_HIDDEN_LSTM = 128
 DIM_HIDDEN_ENC = 128
 
 
-def featurize_dialogs(_data, _domains, _strict, s2v, w2v, device, args):
+def get_value_index(_values, _val):
+    for _idx, candidate in enumerate(_values):
+        if candidate.value == _val:
+            return _idx
+    return -1
+
+
+def featurize_dialogs_elmo(_data, s2v, device, args, pooled=True):
     featurized_dialogs = []
 
-    def get_value_index(_values, _val):
-        for _idx, candidate in enumerate(_values):
-            if candidate.value == _val:
-                return _idx
-        return -1
+    for dg in tqdm(_data):
+        featurized_turns = []
 
-    if args.elmo:
-        elmo = ElmoEmbedder(weight_file=args.elmo_weights,
-                            options_file=args.elmo_options)
-        utt_ftz = ElmoFeaturizer(elmo, "utterance")
-        sys_ftz = ElmoFeaturizer(elmo, "utterance")
-        act_ftz = ElmoFeaturizer(elmo, "act")
-    else:
-        utt_ftz = UserInputNgramFeaturizer(w2v, n=args.M)
-        sys_ftz = UserInputNgramFeaturizer(w2v, n=args.M)
-        act_ftz = ActionFeaturizer(w2v)
+        all_user_utts = []
+        all_system_acts = []
+        all_system_utts = []
+        all_lbls = []
+        all_ys = []
+        all_bsts = []
+
+        for t in dg['turns']:
+            if args.pooled:
+                utt = t['usr_trans_elmo_pool']
+                sys = t['sys_trans_elmo_pool']
+                act = t['sys_acts_elmo_pool']
+            else:
+                utt = t['usr_trans_elmo']
+                sys = t['sys_trans_elmo']
+                act = t['sys_acts_elmo']
+            bst = t['belief_state']
+            lbls = {}
+            for s, v in t['turn_label']:
+                v = v.lower()
+                if v in [_v.value for _v in s2v[s].values]:
+                    lbls[s] = v
+                else:
+                    lbls[s] = "<true>"
+
+            ys = {}
+            for slot, val in lbls.items():
+                values = s2v[slot].values
+                ys[slot] = torch.zeros(len(values))
+                idx = get_value_index(values, val)
+                ys[slot][idx] = 1
+
+            all_user_utts.append(utt)
+            all_system_acts.append(act)
+            all_system_utts.append(sys)
+            all_ys.append(ys)
+            all_lbls.append(lbls)
+            all_bsts.append(bst)
+
+        all_x_utt = all_user_utts
+        all_x_act = all_system_acts
+        all_x_sys = all_system_utts
+
+        for i in range(len(dg['turns'])):
+
+            # Encode user and action representations
+            if args.pooled:
+                x_utt = all_x_utt[i].to(device)
+                x_sys = all_x_sys[i].to(device)
+                x_act = all_x_act[i].to(device)
+            else:
+                x_utt = [t.to(device) for t in
+                         all_x_utt[i]]  # one vector per n
+                x_sys = [t.to(device) for t in
+                         all_x_sys[i]]  # one vector per n
+                x_act = [t.to(device) for t in
+                         all_x_act[i]]
+
+            featurized_turns.append(Turn(
+                all_user_utts[i], all_system_acts[i], all_system_utts[i],
+                x_utt, x_act, x_sys,
+                all_ys[i], all_lbls[i], all_bsts[i]))
+
+        featurized_dialogs.append(Dialog(featurized_turns))
+
+    return featurized_dialogs
+
+
+def featurize_dialogs(_data, s2v, device, args, w2v=None):
+    featurized_dialogs = []
+
+    utt_ftz = UserInputNgramFeaturizer(w2v, n=args.M)
+    sys_ftz = UserInputNgramFeaturizer(w2v, n=args.M)
+    act_ftz = ActionFeaturizer(w2v)
 
     for dg in tqdm(_data):
         featurized_turns = []
@@ -108,15 +176,15 @@ def run(args):
     splits = ["train", "dev"]
     if args.test or args.pred:
         splits = ["test"]
-    data, ontology, vocab, w2v = util.load_dataset(splits=splits,
-                                                   base_path=args.path)
+
+    if args.elmo:
+        data, s2v = util.load_dataset_elmo(splits=splits, base_path=args.path)
+    else:
+        data, ontology, vocab, w2v = util.load_dataset(splits=splits,
+                                                       base_path=args.path)
     #all_data = []
     data_filtered = {}
     data_featurized = {}
-
-    s2v = ontology.values
-    if args.delexicalize_labels:
-        s2v = util.delexicalize(s2v)
 
     # filter data for domains
     for split in splits:
@@ -128,33 +196,30 @@ def run(args):
                                                    args.max_dialog_length)
         if split == "train":
             random.shuffle(data_filtered[split])
-        #all_data.extend(data_filtered[split])
 
-    print(len(s2v))
-    s2v = util.fix_s2v(s2v, data_filtered, splits=splits)
-    print(s2v, len(s2v))
+    # If not using ELMo featurized dataset, create slot-to-value featurization
+    if not args.elmo:
+        # Retrieve and clean slot-value pairs
+        s2v = ontology.values
+        if args.delexicalize_labels:
+            s2v = util.delexicalize(s2v)
+        s2v = util.fix_s2v(s2v, data_filtered, splits=splits)
 
-    if args.elmo:
-        if args.gpu and torch.cuda.is_available():
-            elmo = ElmoEmbedder(weight_file=args.elmo_weights,
-                                options_file=args.elmo_options,
-                                cuda_device=args.gpu)
-        else:
-            elmo = ElmoEmbedder(weight_file=args.elmo_weights,
-                                options_file=args.elmo_options)
-        slot_featurizer = ElmoFeaturizer(elmo, "slot")
-        value_featurizer = ElmoFeaturizer(elmo, "value")
-    else:
+        # Featurize slots and values
         slot_featurizer = SlotFeaturizer(w2v)
         value_featurizer = ValueFeaturizer(w2v)
-    s2v = util.featurize_s2v(s2v, slot_featurizer, value_featurizer)
+        s2v = util.featurize_s2v(s2v, slot_featurizer, value_featurizer)
+
     s2v = util.s2v_to_device(s2v, device)
 
     print("Featurizing...")
     for split in splits:
-        data_featurized[split] = featurize_dialogs(data_filtered[split],
-                                                   domains, strict, s2v,
-                                                   w2v, device, args)
+        if args.elmo:
+            data_featurized[split] = featurize_dialogs_elmo(data_filtered[split],
+                                                            s2v, device, args)
+        else:
+            data_featurized[split] = featurize_dialogs(data_filtered[split],
+                                                   s2v, device, args, w2v=w2v)
 
     key = list(data_featurized.keys())[0]
     DIM_INPUT = len(data_featurized[key][0].turns[0].x_act)
@@ -234,6 +299,8 @@ def get_args():
     parser.add_argument('--max_dev_dialogs', default=-1, type=int)
     parser.add_argument('--elmo', action='store_true',
                         help="If set, use ELMo for encoding inputs")
+    parser.add_argument('--pooled', action='store_true',
+                        help="If set, use max pooled ELMo embeddings")
     parser.add_argument('--elmo_weights',
                         default='res/elmo/elmo_2x1024_128_2048cnn_1xhighway_'
                                 'weights.hdf5')

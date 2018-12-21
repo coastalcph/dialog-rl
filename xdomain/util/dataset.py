@@ -134,6 +134,8 @@ class Dialogue:
             setattr(turn, 'sys_acts_elmo', sys_act_embs[i])
             setattr(turn, 'sys_acts_elmo_pool', sys_act_pooled[i])
 
+        return self
+
     @classmethod
     def from_dict(cls, d):
         return cls(d['dialogue_id'], [Turn.from_dict(t) for t in d['turns']], d['domain'])
@@ -163,7 +165,8 @@ class Dataset:
     def to_elmo(self, elmo):
         dialogues_elmo = []
         for d in tqdm(self.dialogues, desc='Adding ELMo features'):
-            dialogues_elmo.append(d.to_elmo(elmo))
+            e = d.to_elmo(elmo)
+            dialogues_elmo.append(e)
         self.dialogues = dialogues_elmo
 
     def to_dict(self):
@@ -173,7 +176,7 @@ class Dataset:
     def from_dict(cls, d, elmo=None):
         return cls([Dialogue.from_dict(dd) for dd in tqdm(d['dialogues'])])
 
-    @classmethod
+
     def annotate_raw(cls, fname):
         with open(fname) as f:
             data = json.load(f)

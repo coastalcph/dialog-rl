@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import torch
+import pickle
 from pprint import pformat, pprint
 from importlib import import_module
 from vocab import Vocab
@@ -36,14 +37,35 @@ def load_dataset(splits=('train', 'dev', 'test'), domains='all', strict=False,
         with open(os.path.join(path, '{}.json'.format(split))) as f:
             logging.warn('loading split {}'.format(split))
             dataset[split] = Dataset.from_dict(json.load(f))
-            # dataset[split] = Dataset.from_dict(json.load(f), domains, strict)
 
     logging.info('dataset sizes: {}'.format(pformat({k: len(v) for k, v in dataset.items()})))
     return dataset, ontology, vocab, w2v
 
 
+def load_dataset_elmo(splits=('train', 'dev', 'test'), base_path=None):
+    """
+    """
+    logging.info('Loading ELMo featurized data')
+
+    path = base_path if base_path else dann
+
+    dataset = {}
+    for split in splits:
+        print(os.path.join(path, '{}_elmo.pkl'.format(split)))
+        with open(os.path.join(path, '{}_elmo.pkl'.format(split)), 'rb') as f:
+            logging.warn('loading split {}'.format(split))
+            data = pickle.load(f)
+            dataset[split] = data
+
+    s2v = pickle.load(open(os.path.join(path, 's2v_elmo.pkl'), 'rb'))
+
+    logging.info('dataset sizes: {}'.format(pformat({k: len(v) for k, v in dataset.items()})))
+    return dataset, s2v
+
+
+
 def generate_dataset_elmo(elmo, splits=('train', 'dev', 'test'), domains='all', strict=False,
-                      base_path=None):
+                          base_path=None):
     """
     """
     path = base_path if base_path else ''
@@ -54,11 +76,13 @@ def generate_dataset_elmo(elmo, splits=('train', 'dev', 'test'), domains='all', 
     for split in splits:
         with open(os.path.join(path, '{}.json'.format(split))) as f:
             logging.warn('loading split {}'.format(split))
-            dataset[split] = Dataset.from_dict(json.load(f))
-            dataset[split] = dataset[split].to_elmo(elmo)
+            data = Dataset.from_dict(json.load(f))
+            data.dialogues = data.dialogues[:10]
+            data.to_elmo(elmo)
+            dataset[split] = data
 
     logging.info('dataset sizes: {}'.format(pformat({k: len(v) for k, v in dataset.items()})))
-    return dataset, ontoloy
+    return dataset, ontology
 
 
 def get_models():
@@ -162,7 +186,7 @@ def fix_s2v(_s2v, dialogs, splits=['train', 'dev', 'test']):
     return s2v_new
 
 
-def featurize_s2v(s2v_dict, slot_featurizer, value_featurizer):
+def featurize_s2v(s2v_dict, slot_featurizer, value_featurizer, elmo=False):
     out = {}
     print("Featurizing slots and values...")
     for s, vs in tqdm(s2v_dict.items()):
@@ -170,8 +194,13 @@ def featurize_s2v(s2v_dict, slot_featurizer, value_featurizer):
         domain, slot = s.split("-", 1)
         # split at uppercase to get vectors ('priceRange' -> ['price', 'range'])
         words = split_on_uppercase(slot, keep_contiguous=True)
-        slot_emb = slot_featurizer.featurize_turn(words)
-        v_embs = value_featurizer.featurize_batch([v.split() for v in vs])
+        if elmo:
+            # POOLED EMBEDDINGS?
+            _, slot_emb = slot_featurizer.featurize_turn(words)
+            _, v_embs = value_featurizer.featurize_batch([v.split() for v in vs])
+        else:
+            slot_emb = slot_featurizer.featurize_turn(words)
+            v_embs = value_featurizer.featurize_batch([v.split() for v in vs])
         vs_out = [Value(v, v_embs[idx], idx)
                   for idx, v in enumerate(vs)]
         out[s] = Slot(domain, slot_emb, vs_out)

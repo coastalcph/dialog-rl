@@ -106,16 +106,20 @@ class ElmoFeaturizer(Featurizer):
             turn = self.clean_act(turn)
         elif self.mode in ["slot", "value"]:
             turn = [turn]
+            turn = self.clean_act(turn)
         # get elmo embeddings
         if not turn:
             turn = [["<NIL>"]]
         e_toks = self.elmo.batch_to_embeddings(turn)[0][0]
 
         # Sequence of elmo embeddings with all 3 layers concatenated for each token
-        tok_embs = torch.cat((e_toks[0, :, :],
-                              e_toks[1, :, :],
-                              e_toks[2, :, :]),
-                              dim=1)
+        #tok_embs = torch.cat((e_toks[0, :, :],
+        #                      e_toks[1, :, :],
+        #                      e_toks[2, :, :]),
+        #                      dim=1)
+
+        # Average 3 ELMo layers
+        tok_embs = torch.mean(e_toks, dim=0)
 
         # max over tokens & flatten
         pooled = torch.max(e_toks, dim=1)[0].view(-1)
@@ -127,16 +131,20 @@ class ElmoFeaturizer(Featurizer):
             batch = [["<bos>"] + turn + ["<eos>"] for turn in batch]
         elif self.mode == "act":
             batch = [self.clean_act([item for sublist in turn for item in sublist]) for turn in batch]
-        # elif self.mode in ["slot", "value"]:
-        #     batch = [[turn] for turn in batch]
+        elif self.mode in ["slot", "value"]:
+            batch = [self.clean_act(turn) for turn in batch]
 
         e_toks = self.elmo.batch_to_embeddings(batch)[0]
 
         # Sequence of elmo embeddings with all 3 layers concatenated for each token
-        tok_embs = torch.cat((e_toks[:, 0, :, :],
-                              e_toks[:, 1, :, :],
-                              e_toks[:, 2, :, :]),
-                              dim=2)
+        #tok_embs = torch.cat((e_toks[:, 0, :, :],
+        #                      e_toks[:, 1, :, :],
+        #                      e_toks[:, 2, :, :]),
+        #                      dim=2)
+
+        # Average 3 ELMo layers
+        tok_embs = torch.mean(e_toks, dim=1)
+
         # max over tokens & flatten
         pooled = torch.max(e_toks, dim=2)[0].view(len(batch), -1)
 
