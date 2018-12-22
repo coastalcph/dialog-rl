@@ -1,5 +1,6 @@
 from models.statenet import *
 from util import util
+from util.data import *
 from util.featurize import *
 from tqdm import tqdm
 import random
@@ -126,9 +127,9 @@ def run(args):
         data_filtered[split] = util.filter_dialogs(_data, domains, strict,
                                                    max_dialogs,
                                                    args.max_dialog_length)
+
         if split == "train":
             random.shuffle(data_filtered[split])
-        #all_data.extend(data_filtered[split])
 
     print(len(s2v))
     s2v = util.fix_s2v(s2v, data_filtered, splits=splits)
@@ -148,6 +149,7 @@ def run(args):
         slot_featurizer = SlotFeaturizer(w2v)
         value_featurizer = ValueFeaturizer(w2v)
     s2v = util.featurize_s2v(s2v, slot_featurizer, value_featurizer)
+    print("device : ", device)
     s2v = util.s2v_to_device(s2v, device)
 
     print("Featurizing...")

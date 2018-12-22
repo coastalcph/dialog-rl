@@ -12,19 +12,13 @@ from tqdm import tqdm
 from collections import defaultdict
 from pprint import pformat
 from eval import evaluate_preds, shape_reward
-from collections import namedtuple
-#from util import util
+from util import util
+
 
 # TODO refactor such that encoder classes are declared within StateNet, allows
 # for better modularization and sharing of instances/variables such as
 # embeddings
 
-Turn = namedtuple("Turn", ["user_utt", "system_act", "system_utt",
-                           "x_utt", "x_act", "x_sys", "labels", "labels_str",
-                           "belief_state"])
-Dialog = namedtuple("Dialog", ["turns"])
-Slot = namedtuple("Slot", ["domain", "embedding", "values"])
-Value = namedtuple("Value", ["value", "embedding", "idx"])
 
 eps = np.finfo(np.float32).eps.item()
 
@@ -307,99 +301,6 @@ class StateNet(nn.Module):
         logger.addHandler(file_handler)
         return logger
 
-    def embed(self, w, numpy=False):
-        e = self.embeddings.get(w)
-        if not e:
-            e = np.zeros(self.embeddings_len)
-        if numpy:
-            return np.array(e)
-        else:
-            return torch.Tensor(e)
-
-    def embed_batch(self, b):
-        e = [self.embed(w, numpy=True) for w in b]
-        return torch.Tensor(e)
-    #
-    # def forward_turn(self, turn, slots2values, hidden):
-    #     """
-    #
-    #     # :param x_user: shape (batch_size, user_embeddings_dim)
-    #     # :param x_action: shape (batch_size, action_embeddings_dim)
-    #     # :param x_sys: shape (batch_size, sys_embeddings_dim)
-    #     :param turn:
-    #     :param hidden: shape (batch_size, 1, hidden_dim)
-    #     :param slots2values: dict mapping slots to values to be tested
-    #     # :param labels: dict mapping slots to one-hot ground truth value
-    #     representations
-    #     :return: tuple (loss, probs, hidden), with `loss' being the overall
-    #     loss across slots, `probs' a dict mapping slots to probability
-    #     distributions over values, `hidden' the new hidden state
-    #     """
-    #     probs = {}
-    #     binary_filling_probs = {}
-    #
-    #     fu = self.utt_enc(turn.x_utt)  # user input encoding
-    #     fa = self.action_encoder(turn.x_act)  # action input encoding
-    #
-    #     if self.args.encode_sys_utt:
-    #         fy = self.utt_enc(turn.x_sys)
-    #         f_turn_inputs = torch.cat((fu, fa, fy), 0)
-    #     else:
-    #         f_turn_inputs = torch.cat((fu, fa), 0)
-    #
-    #     f_turn, hidden = self.turn_history_rnn(f_turn_inputs, hidden)
-    #
-    #     loss_updates = torch.Tensor([0]).to(self.device)
-    #
-    #     # iterate over slots and values, compute probabilities
-    #     for slot_id in sorted(slots2values.keys()):
-    #         slot = slots2values[slot_id]
-    #         # compute encoding of inputs as described in StateNet paper, Sec. 2
-    #         fs = self.slot_encoder(slot.embedding)
-    #         f_slot_turn = F.mul(fs, f_turn)
-    #
-    #         # get binary prediction for slot presence
-    #         binary_filling_probs[slot_id] = torch.sigmoid(
-    #             self.slot_fill_indicator(f_slot_turn))
-    #
-    #         # get probability distribution over values...
-    #         values = slot.values
-    #         if binary_filling_probs[slot_id] > 0.5:
-    #             probs[slot_id] = torch.zeros(len(values))
-    #             for v, value in enumerate(values):
-    #                 venc = self.value_encoder(value.embedding)
-    #                 # ... by computing 2-Norm distance following paper, Sec. 2.6
-    #                 probs[slot_id][v] = -torch.dist(f_slot_turn, venc)
-    #
-    #             probs[slot_id] = F.softmax(probs[slot_id], 0)  # softmax it!
-    #
-    #     loss = torch.Tensor([0]).to(self.device)
-    #     if self.training:
-    #         for slot_id in slots2values.keys():
-    #
-    #             # loss for binary slot presence
-    #             # gold: 1 if slot in turn.labels (meaning it's filled), else 0
-    #             gold_slot_filling = torch.Tensor(
-    #                 [float(slot_id in turn.labels)]).to(self.device)
-    #             if binary_filling_probs:
-    #                 loss += self.args.eta * F.binary_cross_entropy(
-    #                     binary_filling_probs[slot_id],
-    #                     gold_slot_filling).to(self.device)
-    #                 loss_updates += 1
-    #
-    #             # loss for slot-value pairing, if slot is present
-    #             if slot_id in turn.labels and \
-    #                     binary_filling_probs[slot_id] > 0.5:
-    #                 loss += F.binary_cross_entropy(
-    #                     probs[slot_id],
-    #                     turn.labels[slot_id]
-    #                 ).to(self.device)
-    #                 loss_updates += 1
-    #
-    #     loss = loss / loss_updates
-    #     mean_slots_filled = len(probs) / len(slots2values)
-    #     return loss, probs, hidden, mean_slots_filled
-
     def forward_turn(self, batch, slots2values, hidden):
         """
 
@@ -496,13 +397,7 @@ class StateNet(nn.Module):
         mean_slots_filled = len(probs) / len(slots2values)
         return loss, probs, hidden, mean_slots_filled
 
-    @staticmethod
-    def invert_slot_turns(turn_probs, batch_size):
-        turn_probs_out = [{} for _ in range(batch_size)]
-        for slot_id, turns in turn_probs.items():
-            for t, turn in enumerate(turns):
-                turn_probs_out[t][slot_id] = turn
-        return turn_probs_out
+
 
     def forward(self, dialogs, slots2values):
         batch_size = len(dialogs)
@@ -513,14 +408,14 @@ class StateNet(nn.Module):
         ys_turn = [[] for _ in range(batch_size)]
         scores = [defaultdict(list) for _ in range(batch_size)]
 
-        batch_turns_first, mask = self.turns_first(dialogs)
+        batch_turns_first, mask = util.turns_first(dialogs)
         max_turns = max(mask)
         # turns is list of t-th turns in current batch
         for t, turns in enumerate(batch_turns_first):
             loss, turn_probs, hidden, mean_slots_filled = \
                 self.forward_turn(turns, slots2values, hidden)
             global_loss += loss
-            turn_probs = self.invert_slot_turns(turn_probs, batch_size)
+            turn_probs = util.invert_slot_turns(turn_probs, batch_size)
             turn_preds = [{} for _ in range(batch_size)]
             for batch_item in range(batch_size):
                 if t < mask[batch_item]:
@@ -556,77 +451,13 @@ class StateNet(nn.Module):
             dialog_mean_slots_filled = 0.0
         return ys, ys_turn, scores, global_loss, dialog_mean_slots_filled
 
-    @staticmethod
-    def turns_first(dialogs):
-        pad_turn = dialogs[0].turns[0]
-        x_utt = [pad_turn.x_utt[k] * 0 for k in range(len(pad_turn.x_utt))]
-        x_act = pad_turn.x_act * 0
-        x_sys = pad_turn.x_sys * 0
-        pad_turn = Turn(" ", " ", " ", x_utt, x_act, x_sys, {}, {}, {})
-
-        max_turns = max([len(dialog.turns) for dialog in dialogs])
-        turns = [[] for _ in range(max_turns)]
-        mask = [0 for _ in range(len(dialogs))]
-        for d, dialog in enumerate(dialogs):
-            for t in range(max_turns):
-                if t < len(dialog.turns):
-                    turns[t].append(dialog.turns[t])
-                    mask[d] = t+1
-                else:
-                    turns[t].append(pad_turn)
-        return turns, mask
-    #
-    # def forward(self, dialog, slots2values):
-    #     """
-    #
-    #     :param dialog:
-    #     :param slots2values:
-    #     :return:
-    #     """
-    #     hidden = torch.zeros(1, 1, self.hidden_dim).to(self.device)
-    #     global_probs = {}
-    #     global_loss = torch.Tensor([0]).to(self.device)
-    #     per_turn_mean_slots_filled = []
-    #     ys_turn = []
-    #     scores = defaultdict(list)
-    #
-    #     for t, turn in enumerate(dialog.turns):
-    #         loss, turn_probs, hidden, mean_slots_filled = \
-    #             self.forward_turn(turn, slots2values, hidden)
-    #         per_turn_mean_slots_filled.append(mean_slots_filled)
-    #         global_loss += loss
-    #         turn_preds = {}
-    #         for slot_id, slot in slots2values.items():
-    #
-    #             if slot_id in turn_probs:
-    #                 global_probs[slot_id] = torch.zeros(len(slot.values))
-    #                 argmax = np.argmax(turn_probs[slot_id].detach().numpy(), 0)
-    #                 turn_preds[slot_id] = slots2values[slot_id].values[
-    #                     int(argmax)].value
-    #                 for v, value in enumerate(slot.values):
-    #                     global_probs[slot_id][v] = max(global_probs[slot_id][v],
-    #                                                    turn_probs[slot_id][v])
-    #                 scores[slot_id].append(turn_probs[slot_id])
-    #
-    #         ys_turn.append(turn_preds)
-    #
-    #     # get final predictions
-    #     ys = {}
-    #     for slot, probs in global_probs.items():
-    #         score, argmax = probs.max(0)
-    #         ys[slot] = slots2values[slot].values[int(argmax)].value
-    #
-    #     global_loss = global_loss / len(dialog.turns)
-    #     dialog_mean_slots_filled = np.mean(per_turn_mean_slots_filled)
-    #     return ys, ys_turn, scores, global_loss, dialog_mean_slots_filled
-
     def run_train(self, dialogs_train, dialogs_dev, s2v, args):
         track = defaultdict(list)
         if self.optimizer is None:
             self.set_optimizer()
         self.logger.info("Starting training...")
         if torch.cuda.is_available() and self.device.type == 'cuda':
-            s2v = self.s2v_to_device(s2v)
+            s2v = util.s2v_to_device(s2v, self.device)
         best = {}
         iteration = 0
         for epoch in range(1, args.epochs+1):
@@ -704,7 +535,7 @@ class StateNet(nn.Module):
             self.set_optimizer()
         self.logger.info("Starting reinforcement training...")
         if torch.cuda.is_available() and self.device.type == 'cuda':
-            s2v = self.s2v_to_device(s2v)
+            s2v = util.s2v_to_device(s2v, self.device)
         best = {}
         iteration = 0
         for epoch in range(1, args.epochs + 1):
@@ -838,7 +669,7 @@ class StateNet(nn.Module):
 
     def run_eval(self, dialogs, s2v, eval_domains, outfile):
         if torch.cuda.is_available() and self.device.type == 'cuda':
-            s2v = self.s2v_to_device(s2v)
+            s2v = util.s2v_to_device(s2v, self.device)
         predictions, turn_predictions = self.run_pred(dialogs, s2v)
         return evaluate_preds(dialogs, predictions, turn_predictions,
                               eval_domains, outfile)
@@ -901,21 +732,6 @@ class StateNet(nn.Module):
             raise Exception('No files found!')
         scores.sort(key=lambda tup: tup[0], reverse=True)
         return scores
-
-    def s2v_to_device(self, s2v):
-        s2v_new = {}
-        for slot_name, slot in s2v.items():
-            slot_emb = torch.cuda.FloatTensor(slot.embedding.to(self.device))
-            if 'cuda' not in slot_emb.device.type:
-                slot_emb = slot_emb.to(self.device)
-            vals_new = []
-            for val in slot.values:
-                val_emb = torch.cuda.FloatTensor(val.embedding.to(self.device))
-                if 'cuda' not in val_emb.device.type:
-                    val_emb = val_emb.to(self.device)
-                vals_new.append(Value(val.value, val_emb, val.idx))
-            s2v_new[slot_name] = Slot(slot.domain, slot_emb, vals_new)
-        return s2v_new
 
     def get_device(self, device_id):
         if device_id is not None and torch.cuda.is_available():

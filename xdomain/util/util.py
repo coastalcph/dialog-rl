@@ -8,7 +8,7 @@ from vocab import Vocab
 from util.dataset import Dataset, Ontology
 from util.preprocess_data import dann
 from tqdm import tqdm
-from models.statenet import *
+from util.data import *
 import argparse
 
 
@@ -179,15 +179,6 @@ def featurize_s2v(s2v_dict, slot_featurizer, value_featurizer):
     return out
 
 
-def s2v_to_device(s2v, device):
-    out = {}
-    for s, vs in s2v.items():
-        dom, slot_emb, vs_out = s2v[s]
-        vs_out = [Value(v, v_emb.to(device), idx) for v, v_emb, idx in vs_out]
-        out[s] = Slot(dom, slot_emb.to(device), vs_out)
-    return out
-
-
 def filter_dialogs(data, domains, strict, max_dialogs, max_turns_per_dialog):
     out = []
     for dg in data:
@@ -212,8 +203,8 @@ def filter_dialogs(data, domains, strict, max_dialogs, max_turns_per_dialog):
                     continue
         out.append(dg)
 
-    if max_dialogs > 0:
-        out = out[:max_dialogs]
+        if len(out) == max_dialogs:
+            break
     return out
 
 
@@ -235,3 +226,54 @@ def make_batches(dialogs, batch_size):
             yield dialogs[beg:end]
 
 
+def turns_first(dialogs):
+    pad_turn = dialogs[0].turns[0]
+    x_utt = [pad_turn.x_utt[k] * 0 for k in range(len(pad_turn.x_utt))]
+    x_act = pad_turn.x_act * 0
+    x_sys = pad_turn.x_sys * 0
+    pad_turn = Turn(" ", " ", " ", x_utt, x_act, x_sys, {}, {}, {})
+
+    max_turns = max([len(dialog.turns) for dialog in dialogs])
+    turns = [[] for _ in range(max_turns)]
+    mask = [0 for _ in range(len(dialogs))]
+    for d, dialog in enumerate(dialogs):
+        for t in range(max_turns):
+            if t < len(dialog.turns):
+                turns[t].append(dialog.turns[t])
+                mask[d] = t+1
+            else:
+                turns[t].append(pad_turn)
+    return turns, mask
+
+
+def invert_slot_turns(turn_probs, batch_size):
+    turn_probs_out = [{} for _ in range(batch_size)]
+    for slot_id, turns in turn_probs.items():
+        for t, turn in enumerate(turns):
+            turn_probs_out[t][slot_id] = turn
+    return turn_probs_out
+
+
+def s2v_to_device(s2v, device):
+    out = {}
+    for s, vs in s2v.items():
+        dom, slot_emb, vs_out = s2v[s]
+        vs_out = [Value(v, v_emb.to(device), idx) for v, v_emb, idx in vs_out]
+        out[s] = Slot(dom, slot_emb.to(device), vs_out)
+    return out
+
+
+# def s2v_to_device(s2v, device):
+#     s2v_new = {}
+#     for slot_name, slot in s2v.items():
+#         slot_emb = torch.cuda.FloatTensor(slot.embedding.to(device))
+#         if 'cuda' not in slot_emb.device.type:
+#             slot_emb = slot_emb.to(device)
+#         vals_new = []
+#         for val in slot.values:
+#             val_emb = torch.cuda.FloatTensor(val.embedding.to(device))
+#             if 'cuda' not in val_emb.device.type:
+#                 val_emb = val_emb.to(device)
+#             vals_new.append(Value(val.value, val_emb, val.idx))
+#         s2v_new[slot_name] = Slot(slot.domain, slot_emb, vals_new)
+#     return s2v_new
