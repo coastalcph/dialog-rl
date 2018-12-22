@@ -13,7 +13,7 @@ from collections import defaultdict
 from pprint import pformat
 from eval import evaluate_preds, shape_reward
 from collections import namedtuple
-from util import util
+#from util import util
 
 # TODO refactor such that encoder classes are declared within StateNet, allows
 # for better modularization and sharing of instances/variables such as
@@ -254,7 +254,7 @@ class StateNet(nn.Module):
 
         self.hidden_dim = hidden_dim
         self.args = args
-        self.device = util.get_device(args.gpu)
+        self.device = self.get_device(args.gpu)
 
         if args.encode_sys_utt:
             slot_hidden_dim = 3 * hidden_dim
@@ -727,7 +727,7 @@ class StateNet(nn.Module):
                     self.forward(dialog, s2v)
                 train_predictions.append((predictions, _))
 
-                eval_scores = evaluate_preds([dialog], [predictions], [_], 
+                eval_scores = evaluate_preds([dialog], [predictions], [_],
                                              args.eval_domains)
                 #dialog_reward = eval_scores['final_binary_slot_f1'] + eval_scores['joint_goal']
                 dialog_reward = eval_scores['final_binary_slot_f1']
@@ -916,3 +916,13 @@ class StateNet(nn.Module):
                 vals_new.append(Value(val.value, val_emb, val.idx))
             s2v_new[slot_name] = Slot(slot.domain, slot_emb, vals_new)
         return s2v_new
+
+    def get_device(self, device_id):
+        if device_id is not None and torch.cuda.is_available():
+            num_gpus = torch.cuda.device_count()
+            gpu = device_id % num_gpus
+            return torch.device('cuda:{}'.format(gpu))
+        else:
+            return torch.device('cpu')
+
+

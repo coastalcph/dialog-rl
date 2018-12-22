@@ -11,11 +11,7 @@ from util.dataset import Dataset, Ontology
 
 
 root_dir = os.path.dirname(__file__)
-data_dir = os.path.join(root_dir, 'data', 'woz')
-
-
-furl = 'https://mi.eng.cam.ac.uk/~nm480/woz_2.0.zip'
-fzip = os.path.join(data_dir, 'woz.zip')
+data_dir = os.path.join(root_dir, 'data', 'multiwoz')
 
 draw = os.path.join(data_dir, 'raw')
 dann = os.path.join(data_dir, 'ann')
@@ -39,15 +35,10 @@ if __name__ == '__main__':
     if not os.path.isfile(fzip):
         if not os.path.isdir(data_dir):
             os.makedirs(data_dir)
-        logging.warn('Download from {} to {}'.format(furl, fzip))
-        download(furl, fzip)
 
     if missing_files(draw, splits):
         if not os.path.isdir(draw):
             os.makedirs(draw)
-        download('https://github.com/nmrksic/neural-belief-tracker/raw/master/data/woz/woz_train_en.json', os.path.join(draw, 'train.json'))
-        download('https://github.com/nmrksic/neural-belief-tracker/raw/master/data/woz/woz_validate_en.json', os.path.join(draw, 'dev.json'))
-        download('https://github.com/nmrksic/neural-belief-tracker/raw/master/data/woz/woz_test_en.json', os.path.join(draw, 'test.json'))
 
     if missing_files(dann, files=splits + ['ontology', 'vocab', 'emb']):
         if not os.path.isdir(dann):
