@@ -87,3 +87,14 @@ def get_device(device_id):
         return torch.device('cuda:{}'.format(gpu))
     else:
         return torch.device('cpu')
+
+
+def make_batches(dialogs, batch_size):
+    dialogs = list(dialogs)
+    slices = [(i*batch_size, (i+1)*batch_size)
+              for i in range(len(dialogs)//batch_size + 1)]
+    for beg, end in slices:
+        if beg < len(dialogs)-1:
+            yield dialogs[beg:end]
+
+

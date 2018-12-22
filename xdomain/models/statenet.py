@@ -47,8 +47,9 @@ class MultiScaleReceptors(nn.Module):
         for i in range(self.receptors):
             lin_layer = getattr(self, 'linear_out_{}'.format(i))
             out.append(lin_layer(utt_ngram_rep))
-        # Return concatenated ngram representation
-        return torch.cat(out)
+        # Return concatenated ngram representation: stack along receptors,
+        # transpose such that output shape is [batch_size, receptors, out_dim]
+        return torch.stack(out).transpose(0, 1)
 
 
 class MultiScaleReceptorsModule(nn.Module):
@@ -74,18 +75,19 @@ class MultiScaleReceptorsModule(nn.Module):
         :return:
         """
         rets = []
+        batch_size = len(user_ngram_utterances[0])
         # For each k-gram utterance representation, get output from MSR networks
         for i in range(self.n):
             msr = getattr(self, 'linear_out_r{}'.format(i))
             msr_out = msr(user_ngram_utterances[i])
             rets.append(msr_out)
 
-        rets = torch.stack(rets)
-        out = torch.sum(rets, 0)
+        rets = torch.stack(rets).transpose(0, 1)
+        # sum along n-grams and flatten receptors and hidden
+        out = torch.sum(rets, 1).view(batch_size, -1)
         out = self.layer_norm(out)
         out = F.relu(out)
         out = self.linear_out(out)
-
         return out
 
 
@@ -180,11 +182,12 @@ class PredictionEncoder(nn.Module):
         :param hidden:
         :return: shape (batch_size, self.out_dim)
         """
-        batch_size, embedding_length = inputs.view(1, -1).shape
+        batch_size, embedding_length = inputs.shape
         # reshape input to length 1 sequence (RNN expects input shape
         # [sequence_length, batch_size, embedding_length])
         inputs = inputs.view(1, batch_size, embedding_length)
         # compute output and new hidden state
+        # print(hidden.shape, inputs.shape)
         rnn_out, hidden = self.rnn(inputs, hidden)
         # reshape to [batch_size,
         rnn_out = rnn_out.view(batch_size, -1)
@@ -316,14 +319,94 @@ class StateNet(nn.Module):
     def embed_batch(self, b):
         e = [self.embed(w, numpy=True) for w in b]
         return torch.Tensor(e)
+    #
+    # def forward_turn(self, turn, slots2values, hidden):
+    #     """
+    #
+    #     # :param x_user: shape (batch_size, user_embeddings_dim)
+    #     # :param x_action: shape (batch_size, action_embeddings_dim)
+    #     # :param x_sys: shape (batch_size, sys_embeddings_dim)
+    #     :param turn:
+    #     :param hidden: shape (batch_size, 1, hidden_dim)
+    #     :param slots2values: dict mapping slots to values to be tested
+    #     # :param labels: dict mapping slots to one-hot ground truth value
+    #     representations
+    #     :return: tuple (loss, probs, hidden), with `loss' being the overall
+    #     loss across slots, `probs' a dict mapping slots to probability
+    #     distributions over values, `hidden' the new hidden state
+    #     """
+    #     probs = {}
+    #     binary_filling_probs = {}
+    #
+    #     fu = self.utt_enc(turn.x_utt)  # user input encoding
+    #     fa = self.action_encoder(turn.x_act)  # action input encoding
+    #
+    #     if self.args.encode_sys_utt:
+    #         fy = self.utt_enc(turn.x_sys)
+    #         f_turn_inputs = torch.cat((fu, fa, fy), 0)
+    #     else:
+    #         f_turn_inputs = torch.cat((fu, fa), 0)
+    #
+    #     f_turn, hidden = self.turn_history_rnn(f_turn_inputs, hidden)
+    #
+    #     loss_updates = torch.Tensor([0]).to(self.device)
+    #
+    #     # iterate over slots and values, compute probabilities
+    #     for slot_id in sorted(slots2values.keys()):
+    #         slot = slots2values[slot_id]
+    #         # compute encoding of inputs as described in StateNet paper, Sec. 2
+    #         fs = self.slot_encoder(slot.embedding)
+    #         f_slot_turn = F.mul(fs, f_turn)
+    #
+    #         # get binary prediction for slot presence
+    #         binary_filling_probs[slot_id] = torch.sigmoid(
+    #             self.slot_fill_indicator(f_slot_turn))
+    #
+    #         # get probability distribution over values...
+    #         values = slot.values
+    #         if binary_filling_probs[slot_id] > 0.5:
+    #             probs[slot_id] = torch.zeros(len(values))
+    #             for v, value in enumerate(values):
+    #                 venc = self.value_encoder(value.embedding)
+    #                 # ... by computing 2-Norm distance following paper, Sec. 2.6
+    #                 probs[slot_id][v] = -torch.dist(f_slot_turn, venc)
+    #
+    #             probs[slot_id] = F.softmax(probs[slot_id], 0)  # softmax it!
+    #
+    #     loss = torch.Tensor([0]).to(self.device)
+    #     if self.training:
+    #         for slot_id in slots2values.keys():
+    #
+    #             # loss for binary slot presence
+    #             # gold: 1 if slot in turn.labels (meaning it's filled), else 0
+    #             gold_slot_filling = torch.Tensor(
+    #                 [float(slot_id in turn.labels)]).to(self.device)
+    #             if binary_filling_probs:
+    #                 loss += self.args.eta * F.binary_cross_entropy(
+    #                     binary_filling_probs[slot_id],
+    #                     gold_slot_filling).to(self.device)
+    #                 loss_updates += 1
+    #
+    #             # loss for slot-value pairing, if slot is present
+    #             if slot_id in turn.labels and \
+    #                     binary_filling_probs[slot_id] > 0.5:
+    #                 loss += F.binary_cross_entropy(
+    #                     probs[slot_id],
+    #                     turn.labels[slot_id]
+    #                 ).to(self.device)
+    #                 loss_updates += 1
+    #
+    #     loss = loss / loss_updates
+    #     mean_slots_filled = len(probs) / len(slots2values)
+    #     return loss, probs, hidden, mean_slots_filled
 
-    def forward_turn(self, turn, slots2values, hidden):
+    def forward_turn(self, batch, slots2values, hidden):
         """
 
         # :param x_user: shape (batch_size, user_embeddings_dim)
         # :param x_action: shape (batch_size, action_embeddings_dim)
         # :param x_sys: shape (batch_size, sys_embeddings_dim)
-        :param turn:
+        :param batch:
         :param hidden: shape (batch_size, 1, hidden_dim)
         :param slots2values: dict mapping slots to values to be tested
         # :param labels: dict mapping slots to one-hot ground truth value
@@ -332,20 +415,29 @@ class StateNet(nn.Module):
         loss across slots, `probs' a dict mapping slots to probability
         distributions over values, `hidden' the new hidden state
         """
-        probs = {}
+        batch_size = len(batch)
+        probs = defaultdict(list)
         binary_filling_probs = {}
 
-        fu = self.utt_enc(turn.x_utt)  # user input encoding
-        fa = self.action_encoder(turn.x_act)  # action input encoding
+        # user input encoding [batch_size, hidden_dim]
+        all_utt = [torch.stack([turn.x_utt[k] for turn in batch])
+                   for k in range(len(batch[0].x_utt))]
+        fu = self.utt_enc(all_utt)
+        # system act input encoding [batch_size, hidden_dim]
+        all_act = torch.stack([turn.x_act for turn in batch])
+        fa = self.action_encoder(all_act)
 
         if self.args.encode_sys_utt:
-            fy = self.utt_enc(turn.x_sys)
-            f_turn_inputs = torch.cat((fu, fa, fy), 0)
+            fy = self.utt_enc(torch.Tensor([turn.x_sys for turn in batch]))
+            f_turn_inputs = torch.cat((fu, fa, fy), 1)
         else:
-            f_turn_inputs = torch.cat((fu, fa), 0)
+            f_turn_inputs = torch.cat((fu, fa), 1)
 
+        # turn encodings [batch_size, hidden_dim]
+        # and RNN hidden state [batch_size, hidden_dim_rnn]
         f_turn, hidden = self.turn_history_rnn(f_turn_inputs, hidden)
 
+        # keep track of number of loss updates for later averaging
         loss_updates = torch.Tensor([0]).to(self.device)
 
         # iterate over slots and values, compute probabilities
@@ -353,22 +445,26 @@ class StateNet(nn.Module):
             slot = slots2values[slot_id]
             # compute encoding of inputs as described in StateNet paper, Sec. 2
             fs = self.slot_encoder(slot.embedding)
+            # encoding of slot with turns in batch: [batch_size, hidden_dim]
             f_slot_turn = F.mul(fs, f_turn)
 
-            # get binary prediction for slot presence
+            # get binary prediction for slot presence {slot_id: [batch_size, 1]}
             binary_filling_probs[slot_id] = torch.sigmoid(
                 self.slot_fill_indicator(f_slot_turn))
 
             # get probability distribution over values...
             values = slot.values
-            if binary_filling_probs[slot_id] > 0.5:
-                probs[slot_id] = torch.zeros(len(values))
-                for v, value in enumerate(values):
-                    venc = self.value_encoder(value.embedding)
-                    # ... by computing 2-Norm distance following paper, Sec. 2.6
-                    probs[slot_id][v] = -torch.dist(f_slot_turn, venc)
+            for t, turn in enumerate(batch):
+                probs[slot_id].append(None)
+                if binary_filling_probs[slot_id][t] > 0.5:
+                    probs[slot_id][t] = torch.zeros(len(values))
+                    for v, value in enumerate(values):
+                        venc = self.value_encoder(value.embedding)
+                        # by computing 2-Norm distance following paper, Sec. 2.6
+                        probs[slot_id][t][v] = -torch.dist(f_slot_turn, venc)
 
-                probs[slot_id] = F.softmax(probs[slot_id], 0)  # softmax it!
+                    # softmax it!
+                    probs[slot_id][t] = F.softmax(probs[slot_id][t], 0)
 
         loss = torch.Tensor([0]).to(self.device)
         if self.training:
@@ -376,70 +472,153 @@ class StateNet(nn.Module):
 
                 # loss for binary slot presence
                 # gold: 1 if slot in turn.labels (meaning it's filled), else 0
-                gold_slot_filling = torch.Tensor(
-                    [float(slot_id in turn.labels)]).to(self.device)
-                if binary_filling_probs:
+                # [batch_size, 1]
+                if binary_filling_probs[slot_id] is not None:
+                    gold_slot_filling = torch.Tensor(
+                        [float(slot_id in turn.labels) for turn in batch]
+                    ).view(-1, 1).to(self.device)
                     loss += self.args.eta * F.binary_cross_entropy(
                         binary_filling_probs[slot_id],
                         gold_slot_filling).to(self.device)
                     loss_updates += 1
 
-                # loss for slot-value pairing, if slot is present
-                if slot_id in turn.labels and \
-                        binary_filling_probs[slot_id] > 0.5:
-                    loss += F.binary_cross_entropy(
-                        probs[slot_id],
-                        turn.labels[slot_id]
-                    ).to(self.device)
-                    loss_updates += 1
+                for t, turn in enumerate(batch):
+                    # loss for slot-value pairing, if slot is present
+                    if slot_id in turn.labels and \
+                            binary_filling_probs[slot_id][t] > 0.5:
+                        loss += F.binary_cross_entropy(
+                            probs[slot_id][t],
+                            turn.labels[slot_id]
+                        ).to(self.device)
+                        loss_updates += 1
 
         loss = loss / loss_updates
         mean_slots_filled = len(probs) / len(slots2values)
         return loss, probs, hidden, mean_slots_filled
 
-    def forward(self, dialog, slots2values):
-        """
+    @staticmethod
+    def invert_slot_turns(turn_probs, batch_size):
+        turn_probs_out = [{} for _ in range(batch_size)]
+        for slot_id, turns in turn_probs.items():
+            for t, turn in enumerate(turns):
+                turn_probs_out[t][slot_id] = turn
+        return turn_probs_out
 
-        :param dialog:
-        :param slots2values:
-        :return:
-        """
-        hidden = torch.zeros(1, 1, self.hidden_dim).to(self.device)
-        global_probs = {}
+    def forward(self, dialogs, slots2values):
+        batch_size = len(dialogs)
+        hidden = torch.zeros(1, batch_size, self.hidden_dim).to(self.device)
+        global_probs = [{} for _ in range(batch_size)]
         global_loss = torch.Tensor([0]).to(self.device)
         per_turn_mean_slots_filled = []
-        ys_turn = []
-        scores = defaultdict(list)
+        ys_turn = [[] for _ in range(batch_size)]
+        scores = [defaultdict(list) for _ in range(batch_size)]
 
-        for t, turn in enumerate(dialog.turns):
+        batch_turns_first, mask = self.turns_first(dialogs)
+        max_turns = max(mask)
+        # turns is list of t-th turns in current batch
+        for t, turns in enumerate(batch_turns_first):
             loss, turn_probs, hidden, mean_slots_filled = \
-                self.forward_turn(turn, slots2values, hidden)
-            per_turn_mean_slots_filled.append(mean_slots_filled)
+                self.forward_turn(turns, slots2values, hidden)
             global_loss += loss
-            turn_preds = {}
-            for slot_id, slot in slots2values.items():
+            turn_probs = self.invert_slot_turns(turn_probs, batch_size)
+            turn_preds = [{} for _ in range(batch_size)]
+            for batch_item in range(batch_size):
+                if t < mask[batch_item]:
+                    for slot_id, slot in slots2values.items():
+                        if turn_probs[batch_item][slot_id] is not None:
 
-                if slot_id in turn_probs:
-                    global_probs[slot_id] = torch.zeros(len(slot.values))
-                    argmax = np.argmax(turn_probs[slot_id].detach().numpy(), 0)
-                    turn_preds[slot_id] = slots2values[slot_id].values[
-                        int(argmax)].value
-                    for v, value in enumerate(slot.values):
-                        global_probs[slot_id][v] = max(global_probs[slot_id][v],
-                                                       turn_probs[slot_id][v])
-                    scores[slot_id].append(turn_probs[slot_id])
+                            global_probs[batch_item][slot_id] = \
+                                torch.zeros(len(slot.values))
+                            argmax = np.argmax(turn_probs[batch_item][slot_id].
+                                               detach().numpy(), 0)
+                            turn_preds[batch_item][slot_id] = \
+                                slots2values[slot_id].values[int(argmax)].value
+                            for v, value in enumerate(slot.values):
+                                global_probs[batch_item][slot_id][v] = max(
+                                    global_probs[batch_item][slot_id][v],
+                                    turn_probs[batch_item][slot_id][v])
+                            scores[batch_item][slot_id].append(
+                                turn_probs[batch_item][slot_id])
 
-            ys_turn.append(turn_preds)
+                    ys_turn[batch_item].append(turn_preds[batch_item])
 
-        # get final predictions
-        ys = {}
-        for slot, probs in global_probs.items():
-            score, argmax = probs.max(0)
-            ys[slot] = slots2values[slot].values[int(argmax)].value
+        ys = [{} for _ in range(batch_size)]
+        for batch_item in range(batch_size):
+            for slot, probs in global_probs[batch_item].items():
+                score, argmax = probs.max(0)
+                ys[batch_item][slot] = slots2values[slot].values[
+                    int(argmax)].value
 
-        global_loss = global_loss / len(dialog.turns)
-        dialog_mean_slots_filled = np.mean(per_turn_mean_slots_filled)
+        global_loss = global_loss / max_turns
+        if per_turn_mean_slots_filled:
+            dialog_mean_slots_filled = np.mean(per_turn_mean_slots_filled)
+        else:
+            dialog_mean_slots_filled = 0.0
         return ys, ys_turn, scores, global_loss, dialog_mean_slots_filled
+
+    @staticmethod
+    def turns_first(dialogs):
+        pad_turn = dialogs[0].turns[0]
+        x_utt = [pad_turn.x_utt[k] * 0 for k in range(len(pad_turn.x_utt))]
+        x_act = pad_turn.x_act * 0
+        x_sys = pad_turn.x_sys * 0
+        pad_turn = Turn(" ", " ", " ", x_utt, x_act, x_sys, {}, {}, {})
+
+        max_turns = max([len(dialog.turns) for dialog in dialogs])
+        turns = [[] for _ in range(max_turns)]
+        mask = [0 for _ in range(len(dialogs))]
+        for d, dialog in enumerate(dialogs):
+            for t in range(max_turns):
+                if t < len(dialog.turns):
+                    turns[t].append(dialog.turns[t])
+                    mask[d] = t+1
+                else:
+                    turns[t].append(pad_turn)
+        return turns, mask
+    #
+    # def forward(self, dialog, slots2values):
+    #     """
+    #
+    #     :param dialog:
+    #     :param slots2values:
+    #     :return:
+    #     """
+    #     hidden = torch.zeros(1, 1, self.hidden_dim).to(self.device)
+    #     global_probs = {}
+    #     global_loss = torch.Tensor([0]).to(self.device)
+    #     per_turn_mean_slots_filled = []
+    #     ys_turn = []
+    #     scores = defaultdict(list)
+    #
+    #     for t, turn in enumerate(dialog.turns):
+    #         loss, turn_probs, hidden, mean_slots_filled = \
+    #             self.forward_turn(turn, slots2values, hidden)
+    #         per_turn_mean_slots_filled.append(mean_slots_filled)
+    #         global_loss += loss
+    #         turn_preds = {}
+    #         for slot_id, slot in slots2values.items():
+    #
+    #             if slot_id in turn_probs:
+    #                 global_probs[slot_id] = torch.zeros(len(slot.values))
+    #                 argmax = np.argmax(turn_probs[slot_id].detach().numpy(), 0)
+    #                 turn_preds[slot_id] = slots2values[slot_id].values[
+    #                     int(argmax)].value
+    #                 for v, value in enumerate(slot.values):
+    #                     global_probs[slot_id][v] = max(global_probs[slot_id][v],
+    #                                                    turn_probs[slot_id][v])
+    #                 scores[slot_id].append(turn_probs[slot_id])
+    #
+    #         ys_turn.append(turn_preds)
+    #
+    #     # get final predictions
+    #     ys = {}
+    #     for slot, probs in global_probs.items():
+    #         score, argmax = probs.max(0)
+    #         ys[slot] = slots2values[slot].values[int(argmax)].value
+    #
+    #     global_loss = global_loss / len(dialog.turns)
+    #     dialog_mean_slots_filled = np.mean(per_turn_mean_slots_filled)
+    #     return ys, ys_turn, scores, global_loss, dialog_mean_slots_filled
 
     def run_train(self, dialogs_train, dialogs_dev, s2v, args):
         track = defaultdict(list)
@@ -461,12 +640,15 @@ class StateNet(nn.Module):
             # train and update parameters
             self.train()
             train_predictions = []
-            for dialog in tqdm(dialogs_train):
+            for batch in tqdm(list(util.make_batches(dialogs_train,
+                                                     args.batch_size))):
                 iteration += 1
                 self.zero_grad()
                 predictions, turn_predictions, _, loss, mean_slots_filled = \
-                    self.forward(dialog, s2v)
-                train_predictions.append((predictions, turn_predictions))
+                    self.forward(batch, s2v)
+                for i in range(len(batch)):
+                    train_predictions.append((predictions[i],
+                                              turn_predictions[i]))
                 # print(turn_predictions)
                 global_mean_slots_filled.append(mean_slots_filled)
                 loss.backward()
@@ -651,16 +833,13 @@ class StateNet(nn.Module):
 
     def run_pred(self, dialogs, s2v):
         self.eval()
-        predictions = []
-        for d in tqdm(dialogs):
-            predictions_d, turn_predictions, _, _, _ = self.forward(d, s2v)
-            predictions.append((predictions_d, turn_predictions))
-        return predictions
+        predictions_d, turn_predictions, _, _, _ = self.forward(dialogs, s2v)
+        return predictions_d, turn_predictions
 
     def run_eval(self, dialogs, s2v, eval_domains, outfile):
         if torch.cuda.is_available() and self.device.type == 'cuda':
             s2v = self.s2v_to_device(s2v)
-        predictions, turn_predictions = zip(*self.run_pred(dialogs, s2v))
+        predictions, turn_predictions = self.run_pred(dialogs, s2v)
         return evaluate_preds(dialogs, predictions, turn_predictions,
                               eval_domains, outfile)
 
