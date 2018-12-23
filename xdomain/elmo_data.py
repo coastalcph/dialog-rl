@@ -15,7 +15,7 @@ def main():
     # Init ELMO model
     elmo_emb = ElmoEmbedder(weight_file='res/elmo/elmo_2x1024_128_2048cnn_1xhighway_weights.hdf5',
                             options_file='res/elmo/elmo_2x1024_128_2048cnn_1xhighway_options.json')
-    """
+
     # "Warm up" ELMo embedder (https://github.com/allenai/allennlp/blob/master/tutorials/how_to/elmo.md)
     warmup_data, _, _, _ = util.load_dataset(splits=['train'], base_path='../data/multiwoz/ann/')
     warmup_data = [dg.to_dict() for dg in warmup_data['train'].iter_dialogs()][:500]
@@ -26,7 +26,7 @@ def main():
         for t in d['turns']:
             utts.append(t['transcript'])
         _ = elmo_emb.batch_to_embeddings(utts)
-    """
+
     base_path = '../data/multiwoz/ann/'
     splits = ['train', 'test', 'dev']
     #splits = ['dev']

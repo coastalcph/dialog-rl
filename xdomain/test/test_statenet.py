@@ -1,5 +1,6 @@
 from models.statenet import *
 from util import util
+from util.data import *
 from util.featurize import *
 from tqdm import tqdm
 import random
@@ -50,7 +51,6 @@ def featurize_dialogs_elmo(_data, s2v, device, args, pooled=True):
                     lbls[s] = v
                 else:
                     lbls[s] = "<true>"
-
             ys = {}
             for slot, val in lbls.items():
                 values = s2v[slot].values
@@ -194,6 +194,7 @@ def run(args):
         data_filtered[split] = util.filter_dialogs(_data, domains, strict,
                                                    max_dialogs,
                                                    args.max_dialog_length)
+
         if split == "train":
             random.shuffle(data_filtered[split])
 
@@ -210,6 +211,7 @@ def run(args):
         value_featurizer = ValueFeaturizer(w2v)
         s2v = util.featurize_s2v(s2v, slot_featurizer, value_featurizer)
 
+    print("device : ", device)
     s2v = util.s2v_to_device(s2v, device)
 
     print("Featurizing...")
@@ -220,6 +222,20 @@ def run(args):
         else:
             data_featurized[split] = featurize_dialogs(data_filtered[split],
                                                    s2v, device, args, w2v=w2v)
+
+
+    user_utts, system_acts, system_utts, x_utt, x_act, x_sys, ys, lbls, bsts = data_featurized['train'][0][0][0]
+    print(type(user_utts))
+    print(type(system_acts))
+    print(type(system_utts))
+    print(type(x_utt))
+    print(type(x_act))
+    print(type(x_sys))
+    print(type(ys))
+    print(type(lbls))
+    print(type(bsts))
+    #print(type(data_featurized['train'][0][0][0]))
+
 
     key = list(data_featurized.keys())[0]
     DIM_INPUT = len(data_featurized[key][0].turns[0].x_act)

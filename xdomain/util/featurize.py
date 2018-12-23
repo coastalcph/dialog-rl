@@ -106,7 +106,7 @@ class ElmoFeaturizer(Featurizer):
             turn = self.clean_act(turn)
         elif self.mode in ["slot", "value"]:
             turn = [turn]
-            turn = self.clean_act(turn)
+            #turn = self.clean_act(turn)
         # get elmo embeddings
         if not turn:
             turn = [["<NIL>"]]
@@ -122,7 +122,8 @@ class ElmoFeaturizer(Featurizer):
         tok_embs = torch.mean(e_toks, dim=0)
 
         # max over tokens & flatten
-        pooled = torch.max(e_toks, dim=1)[0].view(-1)
+        pooled = torch.max(tok_embs, dim=0)[0].view(-1)
+        #pooled = torch.max(e_toks, dim=1)[0].view(-1)
 
         return tok_embs, pooled
 
@@ -131,8 +132,8 @@ class ElmoFeaturizer(Featurizer):
             batch = [["<bos>"] + turn + ["<eos>"] for turn in batch]
         elif self.mode == "act":
             batch = [self.clean_act([item for sublist in turn for item in sublist]) for turn in batch]
-        elif self.mode in ["slot", "value"]:
-            batch = [self.clean_act(turn) for turn in batch]
+        #elif self.mode in ["slot", "value"]:
+        #    batch = [self.clean_act(turn) for turn in batch]
 
         e_toks = self.elmo.batch_to_embeddings(batch)[0]
 
@@ -146,7 +147,8 @@ class ElmoFeaturizer(Featurizer):
         tok_embs = torch.mean(e_toks, dim=1)
 
         # max over tokens & flatten
-        pooled = torch.max(e_toks, dim=2)[0].view(len(batch), -1)
+        pooled = torch.max(tok_embs, dim=1)[0].view(len(batch), -1)
+        #pooled = torch.max(e_toks, dim=2)[0].view(len(batch), -1)
 
         return tok_embs, pooled
 

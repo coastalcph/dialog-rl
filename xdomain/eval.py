@@ -31,18 +31,12 @@ def evaluate_preds(dialogs, preds, turn_predictions, eval_domains=None,
                         "system_utt": turn.system_utt}
             turn_gold = turn.labels_str
 
-            # gold_inform = {s: int(np.argmax(v)) for s, v in turn_gold.items()}
-            # pred_inform = {s: int(v) for s, v in turn_predictions[di][ti].items()}
-
             gold_inform = turn_gold
             pred_inform = turn_predictions[di][ti]
 
             turn_out["gold"] = turn_gold
             turn_out["pred"] = pred_inform
 
-            # print("GOLD INFORM", gold_inform)
-            # print("PRED INFORM", pred_inform)
-            # print("=======================")
             for s, v in gold_inform.items():
                 s_domain = s.split("-")[0]
                 if eval_domains and s_domain not in eval_domains:
