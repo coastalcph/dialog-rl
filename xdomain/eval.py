@@ -80,7 +80,10 @@ def evaluate_preds(dialogs, preds, turn_predictions, eval_domains=None,
 
     if f:
         # print(dialogs_out)
-        json.dump(dialogs_out, f)
+        try:
+            json.dump(dialogs_out, f)
+        except:
+            pass
         f.close()
 
     final_R = np.mean(final_binary_slot_recall)
@@ -113,3 +116,4 @@ def shape_reward(reward, scale_in=(0, 1), scale_out=(-2, 2), continuous=False):
     if not continuous:
         scaled = round(scaled)
     return scaled
+

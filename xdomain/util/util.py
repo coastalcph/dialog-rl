@@ -77,7 +77,7 @@ def generate_dataset_elmo(elmo, splits=('train', 'dev', 'test'), domains='all', 
         with open(os.path.join(path, '{}.json'.format(split))) as f:
             logging.warn('loading split {}'.format(split))
             data = Dataset.from_dict(json.load(f))
-            #data.dialogues = data.dialogues[:10]
+            #data.dialogues = data.dialogues[:500]
             data.to_elmo(elmo)
             dataset[split] = data
 
@@ -198,7 +198,6 @@ def featurize_s2v(s2v_dict, slot_featurizer, value_featurizer, elmo=False):
             # POOLED EMBEDDINGS?
             _, slot_emb = slot_featurizer.featurize_turn(words)
             _, v_embs = value_featurizer.featurize_batch([v.split() for v in vs])
-            print(v_embs.shape)
         else:
             slot_emb = slot_featurizer.featurize_turn(words)
             v_embs = value_featurizer.featurize_batch([v.split() for v in vs])
