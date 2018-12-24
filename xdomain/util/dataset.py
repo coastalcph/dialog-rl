@@ -127,11 +127,11 @@ class Dialogue:
 
         # Add both list of ELMO embs for each token and a pooled one with different key
         for i, turn in enumerate(self.turns):
-            setattr(turn, 'usr_trans_elmo', usr_embs[i])
+            #setattr(turn, 'usr_trans_elmo', usr_embs[i])
             setattr(turn, 'usr_trans_elmo_pool', pooled_usr[i])
-            setattr(turn, 'sys_trans_elmo', sys_embs[i])
+            #setattr(turn, 'sys_trans_elmo', sys_embs[i])
             setattr(turn, 'sys_trans_elmo_pool', pooled_sys[i])
-            setattr(turn, 'sys_acts_elmo', sys_act_embs[i])
+            #setattr(turn, 'sys_acts_elmo', sys_act_embs[i])
             setattr(turn, 'sys_acts_elmo_pool', sys_act_pooled[i])
 
         return self
