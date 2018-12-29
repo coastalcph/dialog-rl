@@ -479,9 +479,6 @@ class StateNet(nn.Module):
                                                      args.batch_size))):
                 iteration += 1
                 self.zero_grad()
-                #print(len(batch))
-                #print(batch[0].shape)
-                #input()
                 predictions, turn_predictions, _, loss, mean_slots_filled = \
                     self.forward(batch, s2v)
                 for i in range(len(batch)):
@@ -556,43 +553,55 @@ class StateNet(nn.Module):
             # train and update parameters
             self.train()
             train_predictions = []
-            for dialog in tqdm(dialogs_train):
-                dialog_rewards = []
-                dialog_scores = []
+            for batch in tqdm(list(util.make_batches(dialogs_train,
+                                                     args.batch_size))):
+                batch_rewards = []
+                batch_scores = []
                 iteration += 1
                 self.zero_grad()
-                predictions, _, scores, loss, mean_slots_filled = \
-                    self.forward(dialog, s2v)
-                train_predictions.append((predictions, _))
+                predictions, turn_predictions, scores, loss, mean_slots_filled = \
+                    self.forward(batch, s2v)
+                for i in range(len(batch)):
+                    train_predictions.append((predictions[i],
+                                              turn_predictions[i]))
+            # for dialog in tqdm(dialogs_train):
+            #     dialog_rewards = []
+            #     dialog_scores = []
+            #     iteration += 1
+            #     self.zero_grad()
+            #     predictions, _, scores, loss, mean_slots_filled = \
+            #         self.forward(dialog, s2v)
+            #     train_predictions.append((predictions, _))
 
-                eval_scores = evaluate_preds([dialog], [predictions], [_],
+                eval_scores = evaluate_preds(batch, predictions, turn_predictions,
                                              args.eval_domains)
                 #dialog_reward = eval_scores['final_binary_slot_f1'] + eval_scores['joint_goal']
-                dialog_reward = eval_scores['final_binary_slot_f1']
+                batch_scores = eval_scores['final_binary_slot_f1']
                 #print(">>> DIALOG REWARD:", dialog_reward)
-                dialog_reward = shape_reward(dialog_reward)
+                batch_reward = shape_reward(batch_scores)
                 #print("    > shaped:", dialog_reward)
                 #if np.isnan(dialog_reward):
                 #    dialog_reward = 0
                 #    print(">>>    new DIALOG REWARD:", dialog_reward)
-                for s, slot in enumerate(scores):
-                    for t in range(len(scores[slot])):
-                        slot_turn_scores = F.softmax(scores[slot][t])
-                        m = Categorical(slot_turn_scores)
-                        slot_turn_prediction = m.sample()
-                        slot_turn_prediction_log_prob = m.log_prob(
-                            slot_turn_prediction)
-                        # credit assignment: copy dialog-level reward to each
-                        # slot/turn
-                        dialog_rewards.append(dialog_reward)
-                        #print(dialog_rewards)
-                        dialog_scores.append(slot_turn_prediction_log_prob)
+                for batch_item, slot2score in enumerate(scores):
+                    for slot, score in slot2score.items():
+                        for t in range(len(score)):
+                            slot_turn_scores = F.softmax(scores[batch_item][slot][t])
+                            m = Categorical(slot_turn_scores)
+                            slot_turn_prediction = m.sample()
+                            slot_turn_prediction_log_prob = m.log_prob(
+                                slot_turn_prediction)
+                            # credit assignment: copy dialog-level reward to each
+                            # slot/turn
+                            batch_rewards.append(batch_reward)
+                            #print(dialog_rewards)
+                            batch_scores.append(slot_turn_prediction_log_prob)
 
                 # print(turn_predictions)
                 global_mean_slots_filled.append(mean_slots_filled)
                 track['loss'].append(loss.item())
-                if dialog_rewards:
-                    self.reinforce_update(dialog_rewards, dialog_scores,
+                if batch_rewards:
+                    self.reinforce_update(batch_rewards, batch_scores,
                                           self.args.gamma)
 
             # evalute on train and dev
