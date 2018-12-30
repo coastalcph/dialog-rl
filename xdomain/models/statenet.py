@@ -576,9 +576,8 @@ class StateNet(nn.Module):
                 eval_scores = evaluate_preds(batch, predictions, turn_predictions,
                                              args.eval_domains)
                 #dialog_reward = eval_scores['final_binary_slot_f1'] + eval_scores['joint_goal']
-                batch_scores = eval_scores['final_binary_slot_f1']
                 #print(">>> DIALOG REWARD:", dialog_reward)
-                batch_reward = shape_reward(batch_scores)
+                batch_reward = shape_reward(eval_scores['final_binary_slot_f1'])
                 #print("    > shaped:", dialog_reward)
                 #if np.isnan(dialog_reward):
                 #    dialog_reward = 0
