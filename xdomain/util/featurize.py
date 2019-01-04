@@ -1,6 +1,159 @@
 import numpy as np
 from collections import OrderedDict
 import torch
+from util.data import *
+from tqdm import tqdm
+
+
+def get_value_index(_values, _val):
+    for _idx, candidate in enumerate(_values):
+        if candidate.value == _val:
+            return _idx
+    return -1
+
+
+def featurize_dialogs_elmo(_data, s2v, device, args, pooled=True):
+    featurized_dialogs = []
+
+    for dg in tqdm(_data):
+        featurized_turns = []
+
+        all_user_utts = []
+        all_system_acts = []
+        all_system_utts = []
+        all_lbls = []
+        all_ys = []
+        all_bsts = []
+
+        for t in dg['turns']:
+            if args.pooled:
+                utt = t['usr_trans_elmo_pool']
+                sys = t['sys_trans_elmo_pool']
+                act = t['sys_acts_elmo_pool']
+            else:
+                utt = t['usr_trans_elmo']
+                sys = t['sys_trans_elmo']
+                act = t['sys_acts_elmo']
+            bst = t['belief_state']
+            lbls = {}
+            for s, v in t['turn_label']:
+                v = v.lower()
+                if v in [_v.value for _v in s2v[s].values]:
+                    lbls[s] = v
+                else:
+                    lbls[s] = "<true>"
+            ys = {}
+            for slot, val in lbls.items():
+                values = s2v[slot].values
+                ys[slot] = torch.zeros(len(values))
+                idx = get_value_index(values, val)
+                ys[slot][idx] = 1
+
+            all_user_utts.append(utt)
+            all_system_acts.append(act)
+            all_system_utts.append(sys)
+            all_ys.append(ys)
+            all_lbls.append(lbls)
+            all_bsts.append(bst)
+
+        all_x_utt = all_user_utts
+        all_x_act = all_system_acts
+        all_x_sys = all_system_utts
+
+        for i in range(len(dg['turns'])):
+
+            # Encode user and action representations
+            if args.pooled:
+                x_utt = all_x_utt[i].to(device)
+                x_sys = all_x_sys[i].to(device)
+                x_act = all_x_act[i].to(device)
+            else:
+                x_utt = [t.to(device) for t in
+                         all_x_utt[i]]  # one vector per n
+                x_sys = [t.to(device) for t in
+                         all_x_sys[i]]  # one vector per n
+                x_act = [t.to(device) for t in
+                         all_x_act[i]]
+
+            featurized_turns.append(Turn(
+                all_user_utts[i], all_system_acts[i], all_system_utts[i],
+                x_utt, x_act, x_sys,
+                all_ys[i], all_lbls[i], all_bsts[i]))
+
+        featurized_dialogs.append(Dialog(featurized_turns))
+
+    return featurized_dialogs
+
+
+def featurize_dialogs(_data, s2v, device, args, w2v=None):
+    featurized_dialogs = []
+
+    utt_ftz = UserInputNgramFeaturizer(w2v, n=args.M)
+    sys_ftz = UserInputNgramFeaturizer(w2v, n=args.M)
+    act_ftz = ActionFeaturizer(w2v)
+
+    for dg in tqdm(_data):
+        featurized_turns = []
+
+        all_user_utts = []
+        all_system_acts = []
+        all_system_utts = []
+        all_lbls = []
+        all_ys = []
+        all_bsts = []
+
+        for t in dg['turns']:
+            utt = t['transcript']
+            sys = t['system_transcript']
+            act = t['system_acts']
+            bst = t['belief_state']
+            lbls = {}
+            for s, v in t['turn_label']:
+                v = v.lower()
+                if v in [_v.value for _v in s2v[s].values]:
+                    lbls[s] = v
+                else:
+                    lbls[s] = "<true>"
+
+            ys = {}
+            for slot, val in lbls.items():
+                values = s2v[slot].values
+                ys[slot] = torch.zeros(len(values))
+                idx = get_value_index(values, val)
+                ys[slot][idx] = 1
+
+            all_user_utts.append(utt)
+            all_system_acts.append(act)
+            all_system_utts.append(sys)
+            all_ys.append(ys)
+            all_lbls.append(lbls)
+            all_bsts.append(bst)
+
+        all_x_utt = utt_ftz.featurize_batch(all_user_utts)
+        all_x_act = act_ftz.featurize_batch(all_system_acts)
+        all_x_sys = sys_ftz.featurize_batch(all_system_utts)
+
+        for i in range(len(dg['turns'])):
+
+            # Encode user and action representations
+            if args.elmo:
+                x_utt = all_x_utt[i].to(device)
+                x_sys = all_x_sys[i].to(device)
+            else:
+                x_utt = [t.to(device) for t in
+                         all_x_utt[i]]  # one vector per n
+                x_sys = [t.to(device) for t in
+                         all_x_sys[i]]  # one vector per n
+            x_act = all_x_act[i].to(device)
+
+            featurized_turns.append(Turn(
+                all_user_utts[i], all_system_acts[i], all_system_utts[i],
+                x_utt, x_act, x_sys,
+                all_ys[i], all_lbls[i], all_bsts[i]))
+
+        featurized_dialogs.append(Dialog(featurized_turns))
+
+    return featurized_dialogs
 
 
 def make_n_gram_bow(sequence, n, mode='sum', vectors=True):

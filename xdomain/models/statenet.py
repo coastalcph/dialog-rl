@@ -399,8 +399,6 @@ class StateNet(nn.Module):
         mean_slots_filled = len(probs) / len(slots2values)
         return loss, probs, hidden, mean_slots_filled
 
-
-
     def forward(self, dialogs, slots2values):
         batch_size = len(dialogs)
         hidden = torch.zeros(1, batch_size, self.hidden_dim).to(self.device)
@@ -414,8 +412,6 @@ class StateNet(nn.Module):
         max_turns = max(mask)
         # turns is list of t-th turns in current batch
         for t, turns in enumerate(batch_turns_first):
-            #print('hej', type(turns[0]))
-
             loss, turn_probs, hidden, mean_slots_filled = \
                 self.forward_turn(turns, slots2values, hidden)
             global_loss += loss
