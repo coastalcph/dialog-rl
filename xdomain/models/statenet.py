@@ -451,7 +451,8 @@ class StateNet(nn.Module):
             dialog_mean_slots_filled = 0.0
         return ys, ys_turn, scores, global_loss, dialog_mean_slots_filled
 
-    def run_train(self, dialogs_train, dialogs_dev, s2v, args):
+    def run_train(self, dialogs_train, dialogs_dev, s2v, args,
+                  early_stopping=None):
         track = defaultdict(list)
         if self.optimizer is None:
             self.set_optimizer()
@@ -460,6 +461,7 @@ class StateNet(nn.Module):
             s2v = util.s2v_to_device(s2v, self.device)
         best = {}
         iteration = 0
+        no_improvements_for = 0
         for epoch in range(1, args.epochs+1):
             global_mean_slots_filled = []
             # logger.info('starting epoch {}'.format(epoch))
@@ -511,6 +513,7 @@ class StateNet(nn.Module):
             stop_key = 'eval_dev_{}'.format(args.stop)
             train_key = 'eval_train_{}'.format(args.stop)
             if best.get(stop_key, 0) <= summary[stop_key]:
+                no_improvements_for = 0
                 best_dev = '{:f}'.format(summary[stop_key])
                 best_train = '{:f}'.format(summary[train_key])
                 best.update(summary)
@@ -524,6 +527,18 @@ class StateNet(nn.Module):
                                         key=args.stop)
                           )
                 self.prune_saves()
+            else:
+                no_improvements_for += 1
+                if no_improvements_for > args.patience:
+                    self.logger.info("Ending training after model did not"
+                                     "improve for {} epochs".format(
+                                                no_improvements_for))
+                    break
+                else:
+                    self.logger.info("Model did not improve for {} epochs. "
+                                     "Patience is {} epochs.".format(
+                                        no_improvements_for, args.patience))
+
             summary.update({'best_{}'.format(k): v for k, v in best.items()})
             self.logger.info(pformat(summary))
             track.clear()
@@ -538,6 +553,7 @@ class StateNet(nn.Module):
             s2v = util.s2v_to_device(s2v, self.device)
         best = {}
         iteration = 0
+        no_improvements_for = 0
         for epoch in range(1, args.epochs + 1):
             global_mean_slots_filled = []
             # logger.info('starting epoch {}'.format(epoch))
@@ -625,6 +641,7 @@ class StateNet(nn.Module):
             stop_key = 'eval_dev_{}'.format(args.stop)
             train_key = 'eval_train_{}'.format(args.stop)
             if best.get(stop_key, 0) <= summary[stop_key]:
+                no_improvements_for = 0
                 best_dev = '{:f}'.format(summary[stop_key])
                 best_train = '{:f}'.format(summary[train_key])
                 best.update(summary)
@@ -636,6 +653,14 @@ class StateNet(nn.Module):
                                  iteration=iteration, train=best_train,
                                  dev=best_dev, key=args.stop))
                 self.prune_saves()
+            else:
+                no_improvements_for += 1
+                if no_improvements_for > args.patience:
+                    self.logger.info("Ending training after model did not"
+                                     "improve for {} epochs".format(
+                                                no_improvements_for))
+                    break
+
             summary.update({'best_{}'.format(k): v for k, v in best.items()})
             self.logger.info(pformat(summary))
             track.clear()

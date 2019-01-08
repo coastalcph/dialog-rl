@@ -109,6 +109,8 @@ def get_args():
                         default='default')
     parser.add_argument('--reinforce', action='store_true',
                         help='train with RL')
+    parser.add_argument('--patience', help='Patience for early stopping',
+                        default=20, type=int)
     parser.add_argument('--gamma', help='RL discount', default=0.99, type=float)
     parser.add_argument('--seed', default=42, help='random seed', type=int)
     parser.add_argument('--test', action='store_true',
