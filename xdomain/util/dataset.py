@@ -47,11 +47,11 @@ class Turn:
                     'belief_state': self.belief_state,
                     'system_acts': self.system_acts,
                     'system_transcript': self.system_transcript,
-                    'usr_trans_elmo': self.usr_trans_elmo,
+                    #'usr_trans_elmo': self.usr_trans_elmo,
                     'usr_trans_elmo_pool': self.usr_trans_elmo_pool,
-                    'sys_trans_elmo': self.sys_trans_elmo,
+                    #'sys_trans_elmo': self.sys_trans_elmo,
                     'sys_trans_elmo_pool': self.sys_trans_elmo_pool,
-                    'sys_acts_elmo': self.sys_acts_elmo,
+                    #'sys_acts_elmo': self.sys_acts_elmo,
                     'sys_acts_elmo_pool': self.sys_acts_elmo_pool}
         else:
             return {'turn_id': self.id,
