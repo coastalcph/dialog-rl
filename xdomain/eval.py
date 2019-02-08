@@ -21,7 +21,7 @@ def evaluate_preds(dialogs, preds, turn_predictions, eval_domains=None,
 
     dialogs_out = []
 
-    for di, d in enumerate(dialogs):
+    for di, d in enumerate(dialogs[:-1]):
 
         dialog_out = {"turns": []}
         for ti, turn in enumerate(d.turns):
@@ -32,6 +32,7 @@ def evaluate_preds(dialogs, preds, turn_predictions, eval_domains=None,
             turn_gold = turn.labels_str
 
             gold_inform = turn_gold
+            #print(turn_predictions)
             pred_inform = turn_predictions[di][ti]
 
             turn_out["gold"] = turn_gold
