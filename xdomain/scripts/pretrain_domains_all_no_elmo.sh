@@ -5,19 +5,16 @@
 #SBATCH -p gpu --gres=gpu:titanx:1
 #We expect that our program should not run langer than 4 hours
 #Note that a program will be killed once it exceeds this time!
-#SBATCH --time=12:00:00
-
-#your script, in this case: write the hostname and the ids of the chosen gpus.
-
+#SBATCH --time=20:00:00
 
 hostname
 echo $CUDA_VISIBLE_DEVICES
 
 source /home/grn762/projects/dialog-rl/dialog_env/bin/activate
 
-pretrain=(taxi)
-name=pretrain-$pretrain-single-no-elmo
-bsize=1
+pretrain=(taxi restaurant attraction hotel train)
+name=pretrain-all-no-elmo
+bsize=32
 gpu=1
 
 echo "=============================="
