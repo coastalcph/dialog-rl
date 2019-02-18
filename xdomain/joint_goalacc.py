@@ -4,11 +4,12 @@ import argparse
 import operator
 
 path1 = 'statenet/'
+#this folder should contain the predection for each experiment  i.e. statenet/train-only/prediction1_dv.json
 
 
 parser = argparse.ArgumentParser(description='Input domain specification')
 parser.add_argument('domain', 
-                    help='The domain you input should correspond to a folder in statenet_preds/')
+                    help='The domain you input should correspond to a folder in statenet/')
              
 
 args = parser.parse_args()
