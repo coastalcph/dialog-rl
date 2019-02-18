@@ -4,7 +4,9 @@ import argparse
 import operator
 
 path1 = 'statenet/'
-#this folder should contain the predection for each experiment  i.e. statenet/train-only/prediction1_dv.json
+#this folder should contain the predictions for each experiment  i.e. statenet/train-only/prediction_dv.json
+#inside each experiment folder a new file is created, containing the revised accuracies
+#computing per slot accuracy
 
 
 parser = argparse.ArgumentParser(description='Input domain specification')
