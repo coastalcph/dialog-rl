@@ -75,13 +75,22 @@ class Turn:
                 system_acts.append(['inform'] + s.split() + ['='] + v.split())
             else:
                 system_acts.append(['request'] + a.split())
+
         # NOTE: fix inconsistencies in data label
+	#adjusting the raw turn label to deal with the delexicalization
+	adj_label = []
+	for l in raw['turn_label']:
+	    if len(l)>2:
+		adj_label.append(l[0:2])
+	    else:
+		adj_label.append(l)
+
         fix = {'centre': 'center', 'areas': 'area', 'phone number': 'number'}
         return cls(
             turn_id=raw['turn_idx'],
             transcript=annotate(raw['transcript']),
             system_acts=system_acts,
-            turn_label=[[fix.get(s.strip(), s.strip()), fix.get(v.strip(), v.strip())] for s, v in raw['turn_label']],
+            turn_label=[[fix.get(s.strip(), s.strip()), fix.get(v.strip(), v.strip())] for s, v in adj_label],# raw['turn_label']],
             belief_state=raw['belief_state'],
             system_transcript=raw['system_transcript'],
         )
