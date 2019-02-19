@@ -15,13 +15,14 @@ def evaluate_preds(dialogs, preds, turn_predictions, eval_domains=None,
     final_binary_slot_recall = []
     binary_slot_precision = []
     binary_slot_recall = []
+    turn_joint_goal = []
     f = None
     if write_out:
         f = open(write_out, "w")
 
     dialogs_out = []
 
-    for di, d in enumerate(dialogs):
+    for di, d in enumerate(dialogs[:-1]):
 
         dialog_out = {"turns": []}
         for ti, turn in enumerate(d.turns):
@@ -32,21 +33,35 @@ def evaluate_preds(dialogs, preds, turn_predictions, eval_domains=None,
             turn_gold = turn.labels_str
 
             gold_inform = turn_gold
+            #print(turn_predictions)
             pred_inform = turn_predictions[di][ti]
 
             turn_out["gold"] = turn_gold
             turn_out["pred"] = pred_inform
 
+            turn_goal = False
+            golds = []
+
             for s, v in gold_inform.items():
                 s_domain = s.split("-")[0]
-                if eval_domains and s_domain not in eval_domains:
+                #if eval_domains and s_domain not in eval_domains:
+                if s_domain not in eval_domains:
                     continue
                 s_in_pred_inform = s in pred_inform
                 binary_slot_recall.append(s_in_pred_inform)
+                golds.append((s,v))
                 if s_in_pred_inform:
                     inform.append(v == pred_inform[s])
                 else:
                     inform.append(False)
+
+            ## Turn level inform accuracy
+            golds = set(golds)
+            predictions = set([(s, v) for s, v in pred_inform.items()])
+            turn_joint_goal.append(golds == predictions)
+            #print(golds)
+            #print(predictions)
+            #input()
 
             for s in pred_inform:
                 s_domain = s.split("-")[0]
@@ -59,10 +74,10 @@ def evaluate_preds(dialogs, preds, turn_predictions, eval_domains=None,
         # evaluate final dialog-level performance
         gold_final_belief = {b['slots'][0]: b['slots'][1]
                              for b in d.turns[-1].belief_state}
-
         for s, v in gold_final_belief.items():
             s_domain = s.split("-")[0]
-            if eval_domains and s_domain not in eval_domains:
+            #if eval_domains and s_domain not in eval_domains:
+            if s_domain not in eval_domains:
                 continue
             if s in preds[di]:
                 belief_state.append(v == preds[di][s])
@@ -70,7 +85,8 @@ def evaluate_preds(dialogs, preds, turn_predictions, eval_domains=None,
 
         for s in preds[di]:
             s_domain = s.split("-")[0]
-            if eval_domains and s_domain not in eval_domains:
+            #if eval_domains and s_domain not in eval_domains:
+            if s_domain not in eval_domains:
                 continue
             final_binary_slot_precision.append(s in gold_final_belief)
 
@@ -100,6 +116,7 @@ def evaluate_preds(dialogs, preds, turn_predictions, eval_domains=None,
                 # 'turn_inform': np.mean(inform),
                 # 'turn_request': np.mean(request),
                 'joint_goal': np.mean(joint_goal),
+                'turn_joint_goal': np.mean(turn_joint_goal),
                 'belief_state': np.mean(belief_state),
                 'final_binary_slot_f1': final_binary_slot_F1,
                 'binary_slot_p': P,

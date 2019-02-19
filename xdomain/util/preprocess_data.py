@@ -12,7 +12,7 @@ from util.dataset import Dataset, Ontology
 
 root_dir = os.path.dirname(__file__)
 data_dir = os.path.join(root_dir, 'data', 'multiwoz')
-
+fzip = ""
 draw = os.path.join(data_dir, 'raw')
 dann = os.path.join(data_dir, 'ann')
 
