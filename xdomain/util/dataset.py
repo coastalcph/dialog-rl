@@ -36,7 +36,8 @@ class Turn:
         self.turn_label = turn_label
         self.belief_state = belief_state
         self.system_acts = system_acts
-        self.system_transcript = word_tokenize(system_transcript)
+        #self.system_transcript = word_tokenize(system_transcript)
+        self.system_transcript = system_transcript
         self.num = num or {}
 
     def to_dict(self, elmo=False):
@@ -77,13 +78,13 @@ class Turn:
                 system_acts.append(['request'] + a.split())
 
         # NOTE: fix inconsistencies in data label
-	#adjusting the raw turn label to deal with the delexicalization
-	adj_label = []
-	for l in raw['turn_label']:
-	    if len(l)>2:
-		adj_label.append(l[0:2])
-	    else:
-		adj_label.append(l)
+        #adjusting the raw turn label to deal with the delexicalization
+        adj_label = []
+        for l in raw['turn_label']:
+            if len(l)>2:
+                adj_label.append(l[0:2])
+            else:
+                adj_label.append(l)
 
         fix = {'centre': 'center', 'areas': 'area', 'phone number': 'number'}
         return cls(

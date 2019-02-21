@@ -17,8 +17,8 @@ def main():
                             options_file='res/elmo/elmo_2x1024_128_2048cnn_1xhighway_options.json')
 
     # "Warm up" ELMo embedder (https://github.com/allenai/allennlp/blob/master/tutorials/how_to/elmo.md)
-    warmup_data, _, _, _ = util.load_dataset(splits=['train_delex'], base_path='../data/multiwoz/delex/')
-    warmup_data = [dg.to_dict() for dg in warmup_data['train_delex'].iter_dialogs()][:500]
+    warmup_data, _, _, _ = util.load_dataset(splits=['train'], base_path='../data/multiwoz/delex/')
+    warmup_data = [dg.to_dict() for dg in warmup_data['train'].iter_dialogs()][:500]
 
     print('Warming up ELMo embedder on train dialogs')
     for d in tqdm(warmup_data):
@@ -28,7 +28,7 @@ def main():
         _ = elmo_emb.batch_to_embeddings(utts)
 
     base_path = '../data/multiwoz/delex/'
-    splits = ['train_delex', 'test_delex', 'dev_delex']
+    splits = ['train', 'test', 'dev']
     #splits = ['dev']
 
     # Load dialogs
