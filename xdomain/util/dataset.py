@@ -47,12 +47,12 @@ class Turn:
                     'belief_state': self.belief_state,
                     'system_acts': self.system_acts,
                     'system_transcript': self.system_transcript,
-                    #'usr_trans_elmo': self.usr_trans_elmo,
-                    'usr_trans_elmo_pool': self.usr_trans_elmo_pool,
-                    #'sys_trans_elmo': self.sys_trans_elmo,
-                    'sys_trans_elmo_pool': self.sys_trans_elmo_pool,
-                    #'sys_acts_elmo': self.sys_acts_elmo,
-                    'sys_acts_elmo_pool': self.sys_acts_elmo_pool}
+                    'usr_trans_elmo': self.usr_trans_elmo,
+                    #'usr_trans_elmo_pool': self.usr_trans_elmo_pool,
+                    'sys_trans_elmo': self.sys_trans_elmo,
+                    #'sys_trans_elmo_pool': self.sys_trans_elmo_pool,
+                    'sys_acts_elmo': self.sys_acts_elmo}
+                    #'sys_acts_elmo_pool': self.sys_acts_elmo_pool}
         else:
             return {'turn_id': self.id,
                     'transcript': self.transcript,
@@ -75,13 +75,22 @@ class Turn:
                 system_acts.append(['inform'] + s.split() + ['='] + v.split())
             else:
                 system_acts.append(['request'] + a.split())
+
         # NOTE: fix inconsistencies in data label
+	#adjusting the raw turn label to deal with the delexicalization
+	adj_label = []
+	for l in raw['turn_label']:
+	    if len(l)>2:
+		adj_label.append(l[0:2])
+	    else:
+		adj_label.append(l)
+
         fix = {'centre': 'center', 'areas': 'area', 'phone number': 'number'}
         return cls(
             turn_id=raw['turn_idx'],
             transcript=annotate(raw['transcript']),
             system_acts=system_acts,
-            turn_label=[[fix.get(s.strip(), s.strip()), fix.get(v.strip(), v.strip())] for s, v in raw['turn_label']],
+            turn_label=[[fix.get(s.strip(), s.strip()), fix.get(v.strip(), v.strip())] for s, v in adj_label],# raw['turn_label']],
             belief_state=raw['belief_state'],
             system_transcript=raw['system_transcript'],
         )
@@ -127,12 +136,12 @@ class Dialogue:
 
         # Add both list of ELMO embs for each token and a pooled one with different key
         for i, turn in enumerate(self.turns):
-            #setattr(turn, 'usr_trans_elmo', usr_embs[i])
-            setattr(turn, 'usr_trans_elmo_pool', pooled_usr[i])
-            #setattr(turn, 'sys_trans_elmo', sys_embs[i])
-            setattr(turn, 'sys_trans_elmo_pool', pooled_sys[i])
-            #setattr(turn, 'sys_acts_elmo', sys_act_embs[i])
-            setattr(turn, 'sys_acts_elmo_pool', sys_act_pooled[i])
+            setattr(turn, 'usr_trans_elmo', usr_embs[i])
+            #setattr(turn, 'usr_trans_elmo_pool', pooled_usr[i])
+            setattr(turn, 'sys_trans_elmo', sys_embs[i])
+            #setattr(turn, 'sys_trans_elmo_pool', pooled_sys[i])
+            setattr(turn, 'sys_acts_elmo', sys_act_embs[i])
+            #setattr(turn, 'sys_acts_elmo_pool', sys_act_pooled[i])
 
         return self
 
