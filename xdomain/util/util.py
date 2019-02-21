@@ -186,18 +186,24 @@ def fix_s2v(_s2v, dialogs, splits=('train', 'dev', 'test')):
     return s2v_new
 
 
-def featurize_s2v(s2v_dict, slot_featurizer, value_featurizer, elmo=False):
+def featurize_s2v(s2v_dict, slot_featurizer, value_featurizer, elmo=False, elmo_pool=False):
     out = {}
     print("Featurizing slots and values...")
     for s, vs in tqdm(s2v_dict.items()):
         # remove domain prefix ('restaurant-priceRange' -> 'priceRange')
+        if s == 'Inform':
+            continue
         domain, slot = s.split("-", 1)
         # split at uppercase to get vectors ('priceRange' -> ['price', 'range'])
         words = split_on_uppercase(slot, keep_contiguous=True)
         if elmo:
+            if elmo_pooled:
             # POOLED EMBEDDINGS?
-            _, slot_emb = slot_featurizer.featurize_turn(words)
-            _, v_embs = value_featurizer.featurize_batch([v.split() for v in vs])
+                _, slot_emb = slot_featurizer.featurize_turn(words)
+                _, v_embs = value_featurizer.featurize_batch([v.split() for v in vs])
+            else:
+                slot_emb, _ = slot_featurizer.featurize_turn(words)
+                v_embs, _ = value_featurizer.featurize_batch([v.split() for v in vs])
         else:
             slot_emb = slot_featurizer.featurize_turn(words)
             v_embs = value_featurizer.featurize_batch([v.split() for v in vs])

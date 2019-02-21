@@ -55,7 +55,7 @@ def main():
     slot_featurizer = ElmoFeaturizer(elmo_emb, "slot")
     value_featurizer = ElmoFeaturizer(elmo_emb, "value")
 
-    s2v = util.featurize_s2v(s2v, slot_featurizer, value_featurizer, elmo=True)
+    s2v = util.featurize_s2v(s2v, slot_featurizer, value_featurizer, elmo=True, elmo_pool=False)
 
     # Save s2v
     pickle.dump(s2v, open('{}_elmo_full.pkl'.format(base_path + 's2v'), 'wb'))
