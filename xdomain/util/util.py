@@ -191,7 +191,9 @@ def featurize_s2v(s2v_dict, slot_featurizer, value_featurizer, elmo=False):
     print("Featurizing slots and values...")
     for s, vs in tqdm(s2v_dict.items()):
         # remove domain prefix ('restaurant-priceRange' -> 'priceRange')
-        domain, slot = s.split("-", 1)
+        if '-' in s:
+
+            domain, slot = s.split("-", 1)
         # split at uppercase to get vectors ('priceRange' -> ['price', 'range'])
         words = split_on_uppercase(slot, keep_contiguous=True)
         if elmo:
