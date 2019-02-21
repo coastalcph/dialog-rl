@@ -69,7 +69,7 @@ def generate_dataset_elmo(elmo, splits=('train', 'dev', 'test'), domains='all', 
     """
     """
     path = base_path if base_path else ''
-    with open(os.path.join(path, 'ontology.json')) as f:
+    with open(os.path.join(path, 'ontology_delex.json')) as f:
         ontology = Ontology.from_dict(json.load(f))
 
     dataset = {}

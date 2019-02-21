@@ -9,7 +9,7 @@ import pickle
 
 
 Elmo = namedtuple('Elmo', ['utterance_feat', 'sys_act_feat'])
-DELEX = True
+DELEX = False
 
 def main():
     # Init ELMO model
@@ -17,8 +17,8 @@ def main():
                             options_file='res/elmo/elmo_2x1024_128_2048cnn_1xhighway_options.json')
 
     # "Warm up" ELMo embedder (https://github.com/allenai/allennlp/blob/master/tutorials/how_to/elmo.md)
-    warmup_data, _, _, _ = util.load_dataset(splits=['train'], base_path='../data/multiwoz/ann/')
-    warmup_data = [dg.to_dict() for dg in warmup_data['train'].iter_dialogs()][:500]
+    warmup_data, _, _, _ = util.load_dataset(splits=['train_delex'], base_path='../data/multiwoz/delex/')
+    warmup_data = [dg.to_dict() for dg in warmup_data['train_delex'].iter_dialogs()][:500]
 
     print('Warming up ELMo embedder on train dialogs')
     for d in tqdm(warmup_data):
@@ -27,8 +27,8 @@ def main():
             utts.append(t['transcript'])
         _ = elmo_emb.batch_to_embeddings(utts)
 
-    base_path = '../data/multiwoz/ann/'
-    splits = ['train', 'test', 'dev']
+    base_path = '../data/multiwoz/delex/'
+    splits = ['train_delex', 'test_delex', 'dev_delex']
     #splits = ['dev']
 
     # Load dialogs
@@ -42,7 +42,7 @@ def main():
 
     # Save dataset
     for split in splits:
-        pickle.dump(dia_data[split], open('{}_elmo.pkl'.format(base_path + split), 'wb'))
+        pickle.dump(dia_data[split], open('{}_elmo_full.pkl'.format(base_path + split), 'wb'))
         # Workaround for s2v featurization
         dia_data[split] = [dg.to_dict() for dg in dia_data[split].iter_dialogs()]
 
@@ -58,7 +58,7 @@ def main():
     s2v = util.featurize_s2v(s2v, slot_featurizer, value_featurizer, elmo=True)
 
     # Save s2v
-    pickle.dump(s2v, open('{}_elmo.pkl'.format(base_path + 's2v'), 'wb'))
+    pickle.dump(s2v, open('{}_elmo_full.pkl'.format(base_path + 's2v'), 'wb'))
 
 if __name__ == '__main__':
     main()
