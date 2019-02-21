@@ -59,9 +59,9 @@ def evaluate_preds(dialogs, preds, turn_predictions, eval_domains=None,
             golds = set(golds)
             predictions = set([(s, v) for s, v in pred_inform.items()])
             turn_joint_goal.append(golds == predictions)
-            #print(golds)
-            #print(predictions)
-            #input()
+            #if di == 5:
+            #    print("{} Gold:\t{}".format(ti, golds))
+            #    print("{} Pred:\t{}".format(ti, predictions))
 
             for s in pred_inform:
                 s_domain = s.split("-")[0]

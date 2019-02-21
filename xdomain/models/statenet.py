@@ -473,11 +473,12 @@ class StateNet(nn.Module):
             # train and update parameters
             self.train()
             train_predictions = []
+            s = []
             for batch in tqdm(list(util.make_batches(dialogs_train,
                                                      args.batch_size))):
                 iteration += 1
                 self.zero_grad()
-                predictions, turn_predictions, _, loss, mean_slots_filled = \
+                predictions, turn_predictions, scores, loss, mean_slots_filled = \
                     self.forward(batch, s2v)
                 for i in range(len(batch)):
                     train_predictions.append((predictions[i],
@@ -504,9 +505,9 @@ class StateNet(nn.Module):
                                           "/prediction_dv_{}.json".format(epoch)
                                           ).items()})
 
-            global_mean_slots_filled = np.mean(global_mean_slots_filled)
-            self.logger.info("Predicted {}% slots as present".format(
-                global_mean_slots_filled*100))
+            #global_mean_slots_filled = np.mean(global_mean_slots_filled)
+            #self.logger.info("Predicted {}% slots as present".format(
+            #    global_mean_slots_filled*100))
             self.logger.info("Epoch summary: " + str(summary))
 
             # do early stopping saves
@@ -551,6 +552,11 @@ class StateNet(nn.Module):
         self.logger.info("Starting reinforcement training...")
         if torch.cuda.is_available() and self.device.type == 'cuda':
             s2v = util.s2v_to_device(s2v, self.device)
+        # Lower learning rate for reinforcement training
+        if args.resume:
+            print('REINFORCE lr: {}'.format(args.lr * 0.1) )
+            self.optimizer = optim.Adam(self.parameters(), lr=args.lr * 0.1)
+
         best = {}
         iteration = 0
         no_improvements_for = 0
