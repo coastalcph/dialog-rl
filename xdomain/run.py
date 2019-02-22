@@ -82,8 +82,17 @@ def main(args):
     else:
         print("Training...")
         if args.reinforce:
+            if args.baseline:
+                print('Loading baseline model')
+                baseline = util.load_model(DIM_INPUT, DIM_INPUT, DIM_INPUT, DIM_INPUT,
+                                           args.dhid, args.receptors, args)
+                baseline.load_best_save(directory=args.resume)
+                baseline.trainable = False
+            else:
+                baseline = None
             model.run_train_reinforce(data_featurized["train"],
-                                      data_featurized["dev"], s2v, args)
+                                      data_featurized["dev"], s2v, args,
+                                      baseline=baseline)
         else:
             model.run_train(data_featurized["train"], data_featurized["dev"],
                             s2v, args)
@@ -109,6 +118,8 @@ def get_args():
                         default='default')
     parser.add_argument('--reinforce', action='store_true',
                         help='train with RL')
+    parser.add_argument('--baseline', help='use baseline for variance reduction when fine tuning',
+                        action='store_true')
     parser.add_argument('--patience', help='Patience for early stopping',
                         default=20, type=int)
     parser.add_argument('--gamma', help='RL discount', default=0.99, type=float)

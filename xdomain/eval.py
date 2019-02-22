@@ -129,8 +129,12 @@ def evaluate_preds(dialogs, preds, turn_predictions, eval_domains=None,
 
 
 def shape_reward(reward, scale_in=(0, 1), scale_out=(-2, 2), continuous=False):
-    scaled = (reward - scale_in[0]) / (scale_in[1] - scale_in[0]) * (scale_out[1] - scale_in[0]) + scale_out[0]
+    # Linear interpolation
+    scaled = (reward - scale_in[0]) / (scale_in[1] - scale_in[0]) * (scale_out[1] - scale_out[0]) + scale_out[0]
     if not continuous:
         scaled = round(scaled)
     return scaled
+
+def get_reward(e_scores, w=(0.5, 0.5)):
+    return e_scores['joint_goal'] * w[0] + e_scores['belief_state'] * w[1]
 

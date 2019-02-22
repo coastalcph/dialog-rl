@@ -11,7 +11,7 @@ import numpy as np
 from tqdm import tqdm
 from collections import defaultdict
 from pprint import pformat
-from eval import evaluate_preds, shape_reward
+from eval import evaluate_preds, shape_reward, get_reward
 from util import util
 
 
@@ -544,7 +544,7 @@ class StateNet(nn.Module):
             self.logger.info(pformat(summary))
             track.clear()
 
-    def run_train_reinforce(self, dialogs_train, dialogs_dev, s2v, args):
+    def run_train_reinforce(self, dialogs_train, dialogs_dev, s2v, args, baseline=None):
         nn.utils.clip_grad_norm(self.parameters(), 5)
         track = defaultdict(list)
         if self.optimizer is None:
@@ -595,7 +595,23 @@ class StateNet(nn.Module):
                                              args.eval_domains)
                 #dialog_reward = eval_scores['final_binary_slot_f1'] + eval_scores['joint_goal']
                 #print(">>> DIALOG REWARD:", dialog_reward)
-                batch_reward = shape_reward(eval_scores['final_binary_slot_f1'])
+
+                scale = (-10, 10)
+                reward = get_reward(eval_scores)
+                #print(eval_scores[reward_metric])
+                batch_reward = shape_reward(reward, scale_out=scale)
+
+                base_reward = None
+                if baseline:
+                    base_preds, base_turn_preds, _, _, _ = \
+                        baseline.forward(batch, s2v)
+                    base_eval_scores = evaluate_preds(batch, base_preds, base_turn_preds,
+                                                 args.eval_domains)
+
+                    b_reward = get_reward(base_eval_scores)
+                    # Fiddle around with baseline reward scaling
+                    base_reward = shape_reward(b_reward * 2, scale_out=scale)
+
                 #print("    > shaped:", dialog_reward)
                 #if np.isnan(dialog_reward):
                 #    dialog_reward = 0
@@ -619,7 +635,7 @@ class StateNet(nn.Module):
                 track['loss'].append(loss.item())
                 if batch_rewards:
                     self.reinforce_update(batch_rewards, batch_scores,
-                                          self.args.gamma)
+                                          self.args.gamma, base_reward)
 
             # evalute on train and dev
             summary = {'iteration': iteration, 'epoch': self.epochs_trained}
@@ -671,7 +687,7 @@ class StateNet(nn.Module):
             self.logger.info(pformat(summary))
             track.clear()
 
-    def reinforce_update(self, batch_rewards, log_probs, gamma):
+    def reinforce_update(self, batch_rewards, log_probs, gamma, base_reward):
         R = 0
         rewards = []
         policy_loss = []
@@ -679,6 +695,9 @@ class StateNet(nn.Module):
             R = r + gamma * R
             rewards.insert(0, R)
         rewards = torch.Tensor(rewards)
+
+        if base_reward:
+            rewards -= base_reward
 
         rewards = (rewards - rewards.mean()) / (rewards.std() + eps)
         for log_prob, reward in zip(log_probs, rewards):
@@ -692,7 +711,7 @@ class StateNet(nn.Module):
             # policy_loss.append(reward)
         self.optimizer.zero_grad()
         policy_loss = torch.stack(policy_loss).sum()
-        # print("-- POLICY LOSS --", policy_loss, type(policy_loss))
+        #print("-- POLICY LOSS --", policy_loss, type(policy_loss))
         # policy_loss = torch.autograd.Variable(policy_loss)
         #print(policy_loss)
         # policy_loss.backward(retain_graph=True)
@@ -782,5 +801,4 @@ class StateNet(nn.Module):
             return torch.device('cuda:{}'.format(gpu))
         else:
             return torch.device('cpu')
-
 
