@@ -48,12 +48,12 @@ class Turn:
                     'belief_state': self.belief_state,
                     'system_acts': self.system_acts,
                     'system_transcript': self.system_transcript,
-                    'usr_trans_elmo': self.usr_trans_elmo,
-                    #'usr_trans_elmo_pool': self.usr_trans_elmo_pool,
-                    'sys_trans_elmo': self.sys_trans_elmo,
-                    #'sys_trans_elmo_pool': self.sys_trans_elmo_pool,
-                    'sys_acts_elmo': self.sys_acts_elmo}
-                    #'sys_acts_elmo_pool': self.sys_acts_elmo_pool}
+                    #'usr_trans_elmo': self.usr_trans_elmo,
+                    'usr_trans_elmo_pool': self.usr_trans_elmo_pool,
+                    #'sys_trans_elmo': self.sys_trans_elmo,
+                    'sys_trans_elmo_pool': self.sys_trans_elmo_pool,
+                    #'sys_acts_elmo': self.sys_acts_elmo}
+                    'sys_acts_elmo_pool': self.sys_acts_elmo_pool}
         else:
             return {'turn_id': self.id,
                     'transcript': self.transcript,
@@ -137,12 +137,12 @@ class Dialogue:
 
         # Add both list of ELMO embs for each token and a pooled one with different key
         for i, turn in enumerate(self.turns):
-            setattr(turn, 'usr_trans_elmo', usr_embs[i])
-            #setattr(turn, 'usr_trans_elmo_pool', pooled_usr[i])
-            setattr(turn, 'sys_trans_elmo', sys_embs[i])
-            #setattr(turn, 'sys_trans_elmo_pool', pooled_sys[i])
-            setattr(turn, 'sys_acts_elmo', sys_act_embs[i])
-            #setattr(turn, 'sys_acts_elmo_pool', sys_act_pooled[i])
+            #setattr(turn, 'usr_trans_elmo', usr_embs[i])
+            setattr(turn, 'usr_trans_elmo_pool', pooled_usr[i])
+            #setattr(turn, 'sys_trans_elmo', sys_embs[i])
+            setattr(turn, 'sys_trans_elmo_pool', pooled_sys[i])
+            #setattr(turn, 'sys_acts_elmo', sys_act_embs[i])
+            setattr(turn, 'sys_acts_elmo_pool', sys_act_pooled[i])
 
         return self
 

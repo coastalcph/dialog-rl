@@ -610,7 +610,7 @@ class StateNet(nn.Module):
 
                     b_reward = get_reward(base_eval_scores)
                     # Fiddle around with baseline reward scaling
-                    base_reward = shape_reward(b_reward * 2, scale_out=scale)
+                    base_reward = shape_reward(b_reward * 5, scale_out=scale)
 
                 #print("    > shaped:", dialog_reward)
                 #if np.isnan(dialog_reward):
@@ -636,6 +636,10 @@ class StateNet(nn.Module):
                 if batch_rewards:
                     self.reinforce_update(batch_rewards, batch_scores,
                                           self.args.gamma, base_reward)
+                if iteration % 10 == 0:
+                    ev = self.run_eval(dialogs_dev, s2v, args.eval_domains, None)
+                    print('JG: ', ev['joint_goal'], 'BS:', ev['belief_state'])
+
 
             # evalute on train and dev
             summary = {'iteration': iteration, 'epoch': self.epochs_trained}
@@ -749,7 +753,8 @@ class StateNet(nn.Module):
 
     def load(self, path):
         self.logger.info('loading model from {}'.format(path))
-        state = torch.load(path)
+        #state = torch.load(path)
+        state = torch.load(path, map_location=lambda storage, loc: storage)
         self.load_state_dict(state['model'])
         self.set_optimizer()
         self.optimizer.load_state_dict(state['optimizer'])
