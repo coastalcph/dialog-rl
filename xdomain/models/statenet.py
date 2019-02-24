@@ -597,7 +597,8 @@ class StateNet(nn.Module):
                 #print(">>> DIALOG REWARD:", dialog_reward)
 
                 scale = (-10, 10)
-                reward = get_reward(eval_scores)
+                rew_w = (0.5, 0.5)
+                reward = get_reward(eval_scores, w=rew_w)
                 #print(eval_scores[reward_metric])
                 batch_reward = shape_reward(reward, scale_out=scale)
 
@@ -608,9 +609,9 @@ class StateNet(nn.Module):
                     base_eval_scores = evaluate_preds(batch, base_preds, base_turn_preds,
                                                  args.eval_domains)
 
-                    b_reward = get_reward(base_eval_scores)
+                    b_reward = get_reward(base_eval_scores, w=rew_w)
                     # Fiddle around with baseline reward scaling
-                    base_reward = shape_reward(b_reward * 5, scale_out=scale)
+                    base_reward = shape_reward(b_reward * 6, scale_out=scale)
 
                 #print("    > shaped:", dialog_reward)
                 #if np.isnan(dialog_reward):
@@ -714,7 +715,7 @@ class StateNet(nn.Module):
             # policy_loss.backward()
             # policy_loss.append(reward)
         self.optimizer.zero_grad()
-        policy_loss = torch.stack(policy_loss).sum()
+        policy_loss = torch.stack(policy_loss).sum() / len(log_probs)
         #print("-- POLICY LOSS --", policy_loss, type(policy_loss))
         # policy_loss = torch.autograd.Variable(policy_loss)
         #print(policy_loss)

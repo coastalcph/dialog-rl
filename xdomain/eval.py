@@ -65,7 +65,7 @@ def evaluate_preds(dialogs, preds, turn_predictions, eval_domains=None,
 
             for s in pred_inform:
                 s_domain = s.split("-")[0]
-                if eval_domains and s_domain not in eval_domains:
+                if s_domain not in eval_domains:
                     continue
                 binary_slot_precision.append(s in gold_inform)
 
