@@ -575,10 +575,12 @@ class StateNet(nn.Module):
                                                      args.batch_size))):
                 batch_rewards = []
                 batch_scores = []
+                entropies = []
                 iteration += 1
                 self.zero_grad()
                 predictions, turn_predictions, scores, loss, mean_slots_filled = \
                     self.forward(batch, s2v)
+                #print(loss)
                 for i in range(len(batch)):
                     train_predictions.append((predictions[i],
                                               turn_predictions[i]))
@@ -596,8 +598,8 @@ class StateNet(nn.Module):
                 #dialog_reward = eval_scores['final_binary_slot_f1'] + eval_scores['joint_goal']
                 #print(">>> DIALOG REWARD:", dialog_reward)
 
-                scale = (-10, 10)
-                rew_w = (0.5, 0.5)
+                scale = (0, 10)
+                rew_w = (0.8, 0.2)
                 reward = get_reward(eval_scores, w=rew_w)
                 #print(eval_scores[reward_metric])
                 batch_reward = shape_reward(reward, scale_out=scale)
@@ -611,7 +613,7 @@ class StateNet(nn.Module):
 
                     b_reward = get_reward(base_eval_scores, w=rew_w)
                     # Fiddle around with baseline reward scaling
-                    base_reward = shape_reward(b_reward * 6, scale_out=scale)
+                    base_reward = shape_reward(b_reward * 1.5, scale_out=scale)
 
                 #print("    > shaped:", dialog_reward)
                 #if np.isnan(dialog_reward):
@@ -625,6 +627,9 @@ class StateNet(nn.Module):
                             slot_turn_prediction = m.sample()
                             slot_turn_prediction_log_prob = m.log_prob(
                                 slot_turn_prediction)
+                            # Entropy
+                            entropy = (slot_turn_prediction_log_prob * torch.exp(slot_turn_prediction_log_prob))
+                            entropies.append(entropy)
                             # credit assignment: copy dialog-level reward to each
                             # slot/turn
                             batch_rewards.append(batch_reward)
@@ -636,10 +641,10 @@ class StateNet(nn.Module):
                 track['loss'].append(loss.item())
                 if batch_rewards:
                     self.reinforce_update(batch_rewards, batch_scores,
-                                          self.args.gamma, base_reward)
-                if iteration % 10 == 0:
-                    ev = self.run_eval(dialogs_dev, s2v, args.eval_domains, None)
-                    print('JG: ', ev['joint_goal'], 'BS:', ev['belief_state'])
+                                          self.args.gamma, base_reward, entropies)
+                #if iteration % 10 == 0:
+                #    ev = self.run_eval(dialogs_dev, s2v, args.eval_domains, None)
+                #    print('JG: ', ev['joint_goal'], 'BS:', ev['belief_state'])
 
 
             # evalute on train and dev
@@ -660,9 +665,9 @@ class StateNet(nn.Module):
                                           ).items()})
 
             global_mean_slots_filled = np.mean(global_mean_slots_filled)
-            self.logger.info("Predicted {}% slots as present".format(
-                global_mean_slots_filled * 100))
-            self.logger.info("Epoch summary: " + str(summary))
+            #self.logger.info("Predicted {}% slots as present".format(
+            #    global_mean_slots_filled * 100))
+            #self.logger.info("Epoch summary: " + str(summary))
 
             # do early stopping saves
             stop_key = 'eval_dev_{}'.format(args.stop)
@@ -692,7 +697,7 @@ class StateNet(nn.Module):
             self.logger.info(pformat(summary))
             track.clear()
 
-    def reinforce_update(self, batch_rewards, log_probs, gamma, base_reward):
+    def reinforce_update(self, batch_rewards, log_probs, gamma, base_reward, entropies):
         R = 0
         rewards = []
         policy_loss = []
@@ -702,13 +707,14 @@ class StateNet(nn.Module):
         rewards = torch.Tensor(rewards)
 
         if base_reward:
-            rewards -= base_reward
+            advantage = rewards - base_reward
+            rewards = advantage
 
         rewards = (rewards - rewards.mean()) / (rewards.std() + eps)
-        for log_prob, reward in zip(log_probs, rewards):
+        for log_prob, reward, entropy in zip(log_probs, rewards, entropies):
             if np.isnan(reward):
                 reward = 0
-            policy_loss.append(-log_prob * reward)
+            policy_loss.append(-log_prob * reward + entropy * 0.1)
             # policy_loss.append(-log_prob * (reward+0.001))
             # local_policy_loss = -log_prob * (reward+0.001)
             # local_policy_loss.backward()

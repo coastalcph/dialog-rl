@@ -1,4 +1,5 @@
 import os
+import copy
 from util import util
 from util.featurize import *
 import random
@@ -87,7 +88,10 @@ def main(args):
                 baseline = util.load_model(DIM_INPUT, DIM_INPUT, DIM_INPUT, DIM_INPUT,
                                            args.dhid, args.receptors, args)
                 baseline.load_best_save(directory=args.resume)
-                baseline.trainable = False
+                #baseline.trainable = False
+                #baseline = copy.deepcopy(model)
+                for param in baseline.parameters():
+                    param.requires_grad = False
             else:
                 baseline = None
             model.run_train_reinforce(data_featurized["train"],
