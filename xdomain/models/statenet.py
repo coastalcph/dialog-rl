@@ -574,8 +574,10 @@ class StateNet(nn.Module):
             for batch in tqdm(list(util.make_batches(dialogs_train,
                                                      args.batch_size))):
                 batch_rewards = []
+                batch_base_rewards = []
                 batch_scores = []
                 entropies = []
+                batch_losses = []
                 iteration += 1
                 self.zero_grad()
                 predictions, turn_predictions, scores, loss, mean_slots_filled = \
@@ -595,14 +597,11 @@ class StateNet(nn.Module):
 
                 eval_scores = evaluate_preds(batch, predictions, turn_predictions,
                                              args.eval_domains)
-                #dialog_reward = eval_scores['final_binary_slot_f1'] + eval_scores['joint_goal']
-                #print(">>> DIALOG REWARD:", dialog_reward)
 
-                scale = (0, 10)
+                scale = (-5, 5)
                 rew_w = (0.8, 0.2)
-                reward = get_reward(eval_scores, w=rew_w)
-                #print(eval_scores[reward_metric])
-                batch_reward = shape_reward(reward, scale_out=scale)
+                reward = get_reward(eval_scores)
+                batch_reward = reward #shape_reward(reward, scale_out=scale)
 
                 base_reward = None
                 if baseline:
@@ -611,14 +610,12 @@ class StateNet(nn.Module):
                     base_eval_scores = evaluate_preds(batch, base_preds, base_turn_preds,
                                                  args.eval_domains)
 
-                    b_reward = get_reward(base_eval_scores, w=rew_w)
+                    b_reward = get_reward(base_eval_scores)
                     # Fiddle around with baseline reward scaling
-                    base_reward = shape_reward(b_reward * 1, scale_out=scale)
-
-                #print("    > shaped:", dialog_reward)
-                #if np.isnan(dialog_reward):
-                #    dialog_reward = 0
-                #    print(">>>    new DIALOG REWARD:", dialog_reward)
+                    base_reward = b_reward #shape_reward(b_reward, scale_out=scale)
+                #print(base_reward)
+                #print(batch_reward)
+                """"
                 for batch_item, slot2score in enumerate(scores):
                     for slot, score in slot2score.items():
                         for t in range(len(score)):
@@ -633,18 +630,52 @@ class StateNet(nn.Module):
                             # credit assignment: copy dialog-level reward to each
                             # slot/turn
                             batch_rewards.append(batch_reward)
-                            #print(dialog_rewards)
                             batch_scores.append(slot_turn_prediction_log_prob)
+                """
+                for batch_item, slot2score in enumerate(scores):
+                    # Rewards, log probs and entropy for s-v pairs in each turn
+                    rews = []
+                    brews = []
+                    prbs = []
+                    ents = []
+                    for slot, score in slot2score.items():
+                        for t in range(len(score)):
+                            # Sample and compute log prob for slot predictions for turn
+                            slot_turn_scores = F.softmax(scores[batch_item][slot][t])
+                            m = Categorical(slot_turn_scores)
+                            slot_turn_prediction = m.sample()
+                            slot_turn_prediction_log_prob = m.log_prob(
+                                slot_turn_prediction)
+                            # Entropy
+                            entropy = (slot_turn_prediction_log_prob * torch.exp(slot_turn_prediction_log_prob))
+                            # credit assignment: copy dialog-level reward to each
+                            # slot/turn for discounted reward
+                            ents.append(entropy)
+                            rews.append(batch_reward)
+                            brews.append(base_reward)
+                            prbs.append(slot_turn_prediction_log_prob)
 
-                # print(turn_predictions)
+                            entropies.append(entropy)
+                            batch_rewards.append(batch_reward)
+                            batch_base_rewards.append(base_reward)
+                            batch_scores.append(slot_turn_prediction_log_prob)
+                    # Compute losses for batch item
+                    #bi_loss = self.reinforce_loss(rews, prbs, brews, ents, self.args.gamma)
+                    #batch_losses.append(bi_loss)
+
+                #print(len(scores))
                 global_mean_slots_filled.append(mean_slots_filled)
                 track['loss'].append(loss.item())
                 if batch_rewards:
                     self.reinforce_update(batch_rewards, batch_scores,
-                                          self.args.gamma, base_reward, entropies)
+                                          self.args.gamma, batch_base_rewards, entropies)
+                #if batch_losses:
+                #    self.reinforce_update_losses(batch_losses)
+
                 if iteration % 10 == 0:
                     ev = self.run_eval(dialogs_dev, s2v, args.eval_domains, None)
-                    print('JG: ', ev['joint_goal'], 'BS:', ev['belief_state'])
+                    print('JG: ', ev['joint_goal'], 'BS:', ev['belief_state'], 'DR:', ev['dialog_reward'])
+                    print('Rew:', batch_reward, 'Base:', base_reward)
 
 
             # evalute on train and dev
@@ -697,35 +728,102 @@ class StateNet(nn.Module):
             self.logger.info(pformat(summary))
             track.clear()
 
-    def reinforce_update(self, batch_rewards, log_probs, gamma, base_reward, entropies):
+    def discount_rewards(self, rewards, gamma):
+        """
+            Compute discounted reward
+        """
         R = 0
-        rewards = []
-        policy_loss = []
-        for r in batch_rewards[::-1]:
+        rews = []
+        for r in rewards[::-1]:
             R = r + gamma * R
-            rewards.insert(0, R)
-        rewards = torch.Tensor(rewards)
+            rews.insert(0, R)
+        rews = torch.FloatTensor(rews)
+        return rews
 
-        if base_reward:
-            advantage = rewards - base_reward
-            rewards = advantage
+    def reinforce_update(self, batch_rewards, log_probs, gamma, base_reward, entropies):
+        policy_loss = []
+        beta = 0.05 # Entropy weight
 
-        rewards = (rewards - rewards.mean()) / (rewards.std() + eps)
-        for log_prob, reward, entropy in zip(log_probs, rewards, entropies):
+        # Compute discounted rewards
+        rewards = self.discount_rewards(batch_rewards, gamma)
+        base_rewards = self.discount_rewards(base_reward, gamma)
+
+        #rewards = (rewards - rewards.mean()) / (rewards.std() + eps)
+        #base_rewards = (base_rewards - base_rewards.mean()) / (base_rewards.std() + eps)
+        #print(rewards.mean())
+        #print(base_rewards.mean())
+        for log_prob, reward, base, entropy in zip(log_probs, rewards, base_rewards, entropies):
             if np.isnan(reward):
                 reward = 0
-            policy_loss.append(-log_prob * reward + entropy * 0.1)
+            if np.isnan(base):
+                base = 0
+            policy_loss.append(-log_prob * (reward - base) + entropy * beta)
+            #policy_loss.append(-log_prob * reward)
             # policy_loss.append(-log_prob * (reward+0.001))
             # local_policy_loss = -log_prob * (reward+0.001)
             # local_policy_loss.backward()
             # policy_loss.backward()
             # policy_loss.append(reward)
         self.optimizer.zero_grad()
-        policy_loss = torch.stack(policy_loss).sum() / len(log_probs)
+        policy_loss = torch.stack(policy_loss).sum() #/ len(log_probs)
         #print("-- POLICY LOSS --", policy_loss, type(policy_loss))
         # policy_loss = torch.autograd.Variable(policy_loss)
         #print(policy_loss)
         # policy_loss.backward(retain_graph=True)
+        try:
+            policy_loss.backward()
+            #for p in self.parameters():
+            #    p.data.add_(-self.args.lr, p.grad.data)
+            self.optimizer.step()
+        except RuntimeError:
+            print("WARNING! couldn't update with policy loss:", policy_loss)
+
+
+    def reinforce_loss(self, bi_rewards, log_probs, base_reward, entropies, gamma):
+        """
+            Calculate the loss for a batch items using discounted future rewards, entropy
+            and the advantage for variance reduction
+        """
+        if len(bi_rewards) == len(log_probs) == len(entropies) == 0:
+            return torch.Tensor(0).sum()
+
+        policy_loss = []
+        beta = 0.5
+
+        # TODO Binary reward better/worse than base
+
+        # Discounted reward
+        rewards = self.discount_rewards(bi_rewards, gamma)
+        base_rewards = self.discount_rewards(base_reward, gamma)
+
+        #print(rewards)
+        #print(base_rewards)
+        # Centering
+        #rewards = (rewards - rewards.mean()) / (rewards.std() + eps)
+        #base_rewards = (base_rewards - base_rewards.mean()) / (base_rewards.std() + eps)
+        #print(rewards)
+        #print(base_rewards)
+        #print()
+        # Compute accumulated dialog loss
+        for log_prob, reward, base, entropy in zip(log_probs, rewards, base_rewards, entropies):
+            if np.isnan(reward):
+                reward = 0
+            if np.isnan(base):
+                base = 0
+            # Calculate turn loss
+            policy_loss.append(-log_prob * (reward - base) + entropy * 0.5)
+
+        # Return dialog loss
+        return torch.stack(policy_loss).sum()
+
+    def reinforce_update_losses(self, batch_losses):
+        """
+            Update the policy from computed batch losses
+        """
+
+        self.optimizer.zero_grad()
+        policy_loss = torch.stack(batch_losses).sum()
+
         try:
             policy_loss.backward()
             #for p in self.parameters():

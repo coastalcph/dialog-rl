@@ -147,7 +147,8 @@ def evaluate_preds(dialogs, preds, turn_predictions, eval_domains=None,
 
         # How well did we predict the final belief state
         common_bs = dialog_preds.intersection(gold_final_belief)
-        if len(gold_final_belief) == len(common_bs) == 0:
+        #if len(gold_final_belief) == len(common_bs) == 0:
+        if len(gold_final_belief) == len(dialog_preds) == 0:
             dia_rew = 1
         else:
             dia_rew = len(common_bs) / (len(gold_final_belief) + len(dialog_preds - common_bs))
@@ -206,6 +207,7 @@ def shape_reward(reward, scale_in=(0, 1), scale_out=(-2, 2), continuous=False):
         scaled = round(scaled)
     return scaled
 
-def get_reward(e_scores, w=(0.5, 0.5)):
-    return e_scores['joint_goal'] * w[0] + e_scores['belief_state'] * w[1]
+def get_reward(e_scores):
+    #return e_scores['joint_goal'] * w[0] + e_scores['belief_state'] * w[1]
+    return e_scores['dialog_reward']
 

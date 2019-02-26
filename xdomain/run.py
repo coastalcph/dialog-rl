@@ -13,7 +13,7 @@ def main(args):
     strict = args.train_strict
     print('Training on domains: ',  domains)
     print('Single-domain dialogues only?', strict)
-
+    random.seed(args.seed)
     splits = ["train", "dev"]
     if args.test or args.pred:
         splits = ["test"]
