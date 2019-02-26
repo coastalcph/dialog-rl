@@ -50,7 +50,7 @@ def delex_labels(gold):
     return out
 
 def evaluate_preds(dialogs, preds, turn_predictions, eval_domains=None,
-                   write_out=None, delex=True):
+                   write_out=None, delex=False):
     inform = []
     joint_goal = []
     belief_state = []
