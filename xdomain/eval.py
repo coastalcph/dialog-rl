@@ -144,14 +144,17 @@ def evaluate_preds(dialogs, preds, turn_predictions, eval_domains=None,
 
         gold_final_belief = set([(s, v) for s, v in gold_final_belief.items()])
         dialog_preds = set([(s,v) for s, v in preds[di].items()])
-
+        #print('Gold:', gold_final_belief)
+        #print('Pred:', dialog_preds)
+        #print()
         # How well did we predict the final belief state
-        common_bs = dialog_preds.intersection(gold_final_belief)
-        #if len(gold_final_belief) == len(common_bs) == 0:
+        intersect_bs = dialog_preds.intersection(gold_final_belief)
+        union_bs = dialog_preds.union(gold_final_belief)
         if len(gold_final_belief) == len(dialog_preds) == 0:
             dia_rew = 1
         else:
-            dia_rew = len(common_bs) / (len(gold_final_belief) + len(dialog_preds - common_bs))
+            dia_rew = len(intersect_bs) / len(union_bs)
+            #(len(gold_final_belief) + len(dialog_preds - common_bs))
 
         #if dia_rew > 0.5:
         #    print(dia_rew)

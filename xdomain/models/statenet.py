@@ -10,7 +10,7 @@ from torch.distributions import Categorical
 import numpy as np
 from tqdm import tqdm
 from collections import defaultdict
-from pprint import pformat
+from pprint import pformat, pprint
 from eval import evaluate_preds, shape_reward, get_reward
 from util import util
 
@@ -560,6 +560,8 @@ class StateNet(nn.Module):
         best = {}
         iteration = 0
         no_improvements_for = 0
+        epoch_rewards = []
+        epoch_jg = []
         for epoch in range(1, args.epochs + 1):
             global_mean_slots_filled = []
             # logger.info('starting epoch {}'.format(epoch))
@@ -582,24 +584,16 @@ class StateNet(nn.Module):
                 self.zero_grad()
                 predictions, turn_predictions, scores, loss, mean_slots_filled = \
                     self.forward(batch, s2v)
-                #print(loss)
+
+                # Save for train predictions for evaluation
                 for i in range(len(batch)):
                     train_predictions.append((predictions[i],
                                               turn_predictions[i]))
-            # for dialog in tqdm(dialogs_train):
-            #     dialog_rewards = []
-            #     dialog_scores = []
-            #     iteration += 1
-            #     self.zero_grad()
-            #     predictions, _, scores, loss, mean_slots_filled = \
-            #         self.forward(dialog, s2v)
-            #     train_predictions.append((predictions, _))
 
                 eval_scores = evaluate_preds(batch, predictions, turn_predictions,
                                              args.eval_domains)
 
                 scale = (-5, 5)
-                rew_w = (0.8, 0.2)
                 reward = get_reward(eval_scores)
                 batch_reward = reward #shape_reward(reward, scale_out=scale)
 
@@ -609,12 +603,18 @@ class StateNet(nn.Module):
                         baseline.forward(batch, s2v)
                     base_eval_scores = evaluate_preds(batch, base_preds, base_turn_preds,
                                                  args.eval_domains)
-
                     b_reward = get_reward(base_eval_scores)
                     # Fiddle around with baseline reward scaling
                     base_reward = b_reward #shape_reward(b_reward, scale_out=scale)
-                #print(base_reward)
+
+                    #if batch_reward >= base_reward:
+                    #    batch_reward = 1
+                    #    base_reward = 0
+                    #else:
+                    #    batch_reward = 0
+                    #    base_reward = 1
                 #print(batch_reward)
+                #print(base_reward)
                 """"
                 for batch_item, slot2score in enumerate(scores):
                     for slot, score in slot2score.items():
@@ -632,20 +632,25 @@ class StateNet(nn.Module):
                             batch_rewards.append(batch_reward)
                             batch_scores.append(slot_turn_prediction_log_prob)
                 """
+                #input()
+                #print("SCORES:", scores)
                 for batch_item, slot2score in enumerate(scores):
                     # Rewards, log probs and entropy for s-v pairs in each turn
                     rews = []
                     brews = []
                     prbs = []
                     ents = []
+                    #print("slot2score:", slot2score.items())
                     for slot, score in slot2score.items():
                         for t in range(len(score)):
                             # Sample and compute log prob for slot predictions for turn
-                            slot_turn_scores = F.softmax(scores[batch_item][slot][t])
+                            slot_turn_scores = scores[batch_item][slot][t] #F.softmax(scores[batch_item][slot][t])
                             m = Categorical(slot_turn_scores)
                             slot_turn_prediction = m.sample()
                             slot_turn_prediction_log_prob = m.log_prob(
                                 slot_turn_prediction)
+                            # TODO take argmax with prob 1-eps and sample with prob eps
+
                             # Entropy
                             entropy = (slot_turn_prediction_log_prob * torch.exp(slot_turn_prediction_log_prob))
                             # credit assignment: copy dialog-level reward to each
@@ -655,29 +660,36 @@ class StateNet(nn.Module):
                             brews.append(base_reward)
                             prbs.append(slot_turn_prediction_log_prob)
 
-                            entropies.append(entropy)
-                            batch_rewards.append(batch_reward)
-                            batch_base_rewards.append(base_reward)
-                            batch_scores.append(slot_turn_prediction_log_prob)
+                            #entropies.append(entropy)
+                            #batch_rewards.append(batch_reward)
+                            #batch_base_rewards.append(base_reward)
+                            #batch_scores.append(slot_turn_prediction_log_prob)
+                        #input()
                     # Compute losses for batch item
-                    #bi_loss = self.reinforce_loss(rews, prbs, brews, ents, self.args.gamma)
-                    #batch_losses.append(bi_loss)
+                    bi_loss = self.reinforce_loss(rews, prbs, brews, ents, self.args.gamma)
+                    batch_losses.append(bi_loss)
 
                 #print(len(scores))
                 global_mean_slots_filled.append(mean_slots_filled)
                 track['loss'].append(loss.item())
-                if batch_rewards:
-                    self.reinforce_update(batch_rewards, batch_scores,
-                                          self.args.gamma, batch_base_rewards, entropies)
-                #if batch_losses:
-                #    self.reinforce_update_losses(batch_losses)
 
-                if iteration % 10 == 0:
-                    ev = self.run_eval(dialogs_dev, s2v, args.eval_domains, None)
-                    print('JG: ', ev['joint_goal'], 'BS:', ev['belief_state'], 'DR:', ev['dialog_reward'])
-                    print('Rew:', batch_reward, 'Base:', base_reward)
+                #if batch_rewards:
+                #    self.reinforce_update(batch_rewards, batch_scores,
+                #                          self.args.gamma, batch_base_rewards, entropies)
 
+                if batch_losses:
+                    self.reinforce_update_losses(batch_losses)
 
+                #if iteration % 10 == 0:
+                #    ev = self.run_eval(dialogs_dev, s2v, args.eval_domains, None)
+                #    self.train()
+                #    epoch_rewards.append(ev['dialog_reward'])
+                #    epoch_jg.append(ev['joint_goal'])
+                #    print('JG: ', ev['joint_goal'], 'BS:', ev['belief_state'], 'DR:', ev['dialog_reward'])
+                #    print('Rew:', batch_reward, 'Base:', base_reward)
+
+            #print(epoch_rewards)
+            #print(epoch_jg)
             # evalute on train and dev
             summary = {'iteration': iteration, 'epoch': self.epochs_trained}
             for k, v in track.items():
@@ -785,33 +797,32 @@ class StateNet(nn.Module):
             and the advantage for variance reduction
         """
         if len(bi_rewards) == len(log_probs) == len(entropies) == 0:
-            return torch.Tensor(0).sum()
+            return torch.tensor(0., requires_grad=True).sum()
 
         policy_loss = []
-        beta = 0.5
+        beta = 0.05
 
         # TODO Binary reward better/worse than base
 
         # Discounted reward
+        #rewards = bi_rewards
+        #base_rewards = base_reward
         rewards = self.discount_rewards(bi_rewards, gamma)
         base_rewards = self.discount_rewards(base_reward, gamma)
 
-        #print(rewards)
-        #print(base_rewards)
         # Centering
         #rewards = (rewards - rewards.mean()) / (rewards.std() + eps)
         #base_rewards = (base_rewards - base_rewards.mean()) / (base_rewards.std() + eps)
-        #print(rewards)
-        #print(base_rewards)
-        #print()
+
         # Compute accumulated dialog loss
         for log_prob, reward, base, entropy in zip(log_probs, rewards, base_rewards, entropies):
             if np.isnan(reward):
                 reward = 0
             if np.isnan(base):
                 base = 0
-            # Calculate turn loss
-            policy_loss.append(-log_prob * (reward - base) + entropy * 0.5)
+            # Calculate 'turn' loss
+            advantage = reward - base
+            policy_loss.append(-log_prob * advantage + entropy * beta)
 
         # Return dialog loss
         return torch.stack(policy_loss).sum()
@@ -824,13 +835,13 @@ class StateNet(nn.Module):
         self.optimizer.zero_grad()
         policy_loss = torch.stack(batch_losses).sum()
 
-        try:
-            policy_loss.backward()
+        #try:
+        policy_loss.backward()
             #for p in self.parameters():
             #    p.data.add_(-self.args.lr, p.grad.data)
-            self.optimizer.step()
-        except RuntimeError:
-            print("WARNING! couldn't update with policy loss:", policy_loss)
+        self.optimizer.step()
+        #except RuntimeError:
+        #    print("WARNING! couldn't update with policy loss:", policy_loss)
 
     def run_pred(self, dialogs, s2v):
         self.eval()
