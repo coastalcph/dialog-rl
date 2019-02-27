@@ -1,5 +1,6 @@
 import os
 import re
+import copy
 import logging
 import torch
 from torch import nn
@@ -554,14 +555,18 @@ class StateNet(nn.Module):
             s2v = util.s2v_to_device(s2v, self.device)
         # Lower learning rate for reinforcement training
         if args.resume:
-            print('REINFORCE lr: {}'.format(args.lr * 0.1) )
-            self.optimizer = optim.Adam(self.parameters(), lr=args.lr * 0.1)
+            lr_rl = args.lr * 0.1
+            print('REINFORCE lr: {}'.format(lr_rl) )
+            self.optimizer = optim.Adam(self.parameters(), lr=lr_rl)
 
         best = {}
         iteration = 0
         no_improvements_for = 0
         epoch_rewards = []
         epoch_jg = []
+
+        best_reward = 0
+        hill_climb_patience = 0
         for epoch in range(1, args.epochs + 1):
             global_mean_slots_filled = []
             # logger.info('starting epoch {}'.format(epoch))
@@ -582,20 +587,44 @@ class StateNet(nn.Module):
                 batch_losses = []
                 iteration += 1
                 self.zero_grad()
+
                 predictions, turn_predictions, scores, loss, mean_slots_filled = \
                     self.forward(batch, s2v)
-
-                # Save for train predictions for evaluation
-                for i in range(len(batch)):
-                    train_predictions.append((predictions[i],
-                                              turn_predictions[i]))
 
                 eval_scores = evaluate_preds(batch, predictions, turn_predictions,
                                              args.eval_domains)
 
-                scale = (-5, 5)
                 reward = get_reward(eval_scores)
-                batch_reward = reward #shape_reward(reward, scale_out=scale)
+                batch_reward = reward
+                #scale = (-5, 5)
+                #batch_reward = shape_reward(reward, scale_out=scale)
+
+                # Eval on dev set and roll back if performance has gone down too much
+                if iteration % 5 == 0:
+                    # Dev predictions
+                    dev_rew = self.run_eval(dialogs_dev, s2v, args.eval_domains, None)['dialog_reward']#['dialog_reward']
+                    self.train()
+
+                    if dev_rew > best_reward:
+                        print('Current best rew:', dev_rew)
+                        best_reward = dev_rew
+                        self.save('best-rl', 'best-rl')
+                    elif hill_climb_patience == 15:
+                        print('Patience reached, rolling back to previous best')
+                        fname = self.args.dout + '/best-rl.t7'
+                        self.load(fname)
+                        #self.optimizer.state['epoch'] = self.epochs_trained
+                        hill_climb_patience = 0
+
+                        # Get new predictions/reward
+                        predictions, turn_predictions, scores, loss, mean_slots_filled = \
+                            self.forward(batch, s2v)
+                        eval_scores = evaluate_preds(batch, predictions, turn_predictions,
+                                                     args.eval_domains)
+                        reward = get_reward(eval_scores)
+                        batch_reward = reward
+                    else:
+                        hill_climb_patience += 1
 
                 base_reward = None
                 if baseline:
@@ -607,15 +636,7 @@ class StateNet(nn.Module):
                     # Fiddle around with baseline reward scaling
                     base_reward = b_reward #shape_reward(b_reward, scale_out=scale)
 
-                    #if batch_reward >= base_reward:
-                    #    batch_reward = 1
-                    #    base_reward = 0
-                    #else:
-                    #    batch_reward = 0
-                    #    base_reward = 1
-                #print(batch_reward)
-                #print(base_reward)
-                """"
+                """
                 for batch_item, slot2score in enumerate(scores):
                     for slot, score in slot2score.items():
                         for t in range(len(score)):
@@ -632,15 +653,12 @@ class StateNet(nn.Module):
                             batch_rewards.append(batch_reward)
                             batch_scores.append(slot_turn_prediction_log_prob)
                 """
-                #input()
-                #print("SCORES:", scores)
                 for batch_item, slot2score in enumerate(scores):
                     # Rewards, log probs and entropy for s-v pairs in each turn
                     rews = []
                     brews = []
                     prbs = []
                     ents = []
-                    #print("slot2score:", slot2score.items())
                     for slot, score in slot2score.items():
                         for t in range(len(score)):
                             # Sample and compute log prob for slot predictions for turn
@@ -664,7 +682,7 @@ class StateNet(nn.Module):
                             #batch_rewards.append(batch_reward)
                             #batch_base_rewards.append(base_reward)
                             #batch_scores.append(slot_turn_prediction_log_prob)
-                        #input()
+
                     # Compute losses for batch item
                     bi_loss = self.reinforce_loss(rews, prbs, brews, ents, self.args.gamma)
                     batch_losses.append(bi_loss)
@@ -686,7 +704,11 @@ class StateNet(nn.Module):
                 #    epoch_rewards.append(ev['dialog_reward'])
                 #    epoch_jg.append(ev['joint_goal'])
                 #    print('JG: ', ev['joint_goal'], 'BS:', ev['belief_state'], 'DR:', ev['dialog_reward'])
-                #    print('Rew:', batch_reward, 'Base:', base_reward)
+                # Save for train predictions for evaluation
+
+                for i in range(len(batch)):
+                    train_predictions.append((predictions[i],
+                                              turn_predictions[i]))
 
             #print(epoch_rewards)
             #print(epoch_jg)
@@ -866,6 +888,18 @@ class StateNet(nn.Module):
             'epoch': self.epochs_trained
         }
         torch.save(state, fname)
+
+    def load_rl_model(self, revert=True):
+        self.logger.info('Reverting to previous best model')
+        fname = '{}/best-rl.t7'.format(self.args.dout)
+        state = torch.load(fname, map_location=lambda storage, loc: storage)
+        self.set_optimizer()
+        resume_from_epoch = state.get('epoch', 0)
+        self.set_epochs_trained(resume_from_epoch)
+        for state in self.optimizer.state.values():
+            for k, v in state.items():
+                if isinstance(v, torch.Tensor):
+                    state[k] = v.to(self.device)
 
     def load(self, path):
         self.logger.info('loading model from {}'.format(path))
