@@ -1,6 +1,5 @@
 import os
 import re
-import copy
 import logging
 import torch
 from torch import nn
@@ -11,8 +10,8 @@ from torch.distributions import Categorical
 import numpy as np
 from tqdm import tqdm
 from collections import defaultdict
-from pprint import pformat, pprint
-from eval import evaluate_preds, shape_reward, get_reward
+from pprint import pformat
+from util.eval import evaluate_preds, get_reward
 from util import util
 
 

@@ -1,5 +1,4 @@
 import os
-import copy
 from util import util
 from util.featurize import *
 import random
@@ -152,7 +151,7 @@ def get_args():
     parser.add_argument('--eta', help='factor for loss for binary slot filling '
                                       'prediction', default=0.5, type=float)
     parser.add_argument('--path', help='path to data files',
-                        default='../data/multiwoz/ann/')
+                        default='data/multiwoz/ann/')
     parser.add_argument('--max_dialog_length', default=-1, type=int)
     parser.add_argument('--max_train_dialogs', default=-1, type=int)
     parser.add_argument('--max_dev_dialogs', default=-1, type=int)

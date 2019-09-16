@@ -1,7 +1,5 @@
-import json
 from tqdm import tqdm
 from util import util
-from pprint import pprint
 from allennlp.commands.elmo import ElmoEmbedder
 from util.featurize import ElmoFeaturizer
 from collections import namedtuple
