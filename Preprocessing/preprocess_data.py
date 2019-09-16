@@ -11,7 +11,7 @@ from dataset import Dataset, Ontology
 
 
 root_dir = os.path.dirname(__file__)
-data_dir = os.path.join(root_dir, 'MULTIWOZ')
+data_dir = root_dir #os.path.join(root_dir, 'MULTIWOZ')
 
 
 #furl = 'https://mi.eng.cam.ac.uk/~nm480/woz_2.0.zip'
