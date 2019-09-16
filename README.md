@@ -9,7 +9,7 @@ This is the code repository for our paper [Domain Transfer in Dialogue Systems w
 pip install -r requirements.txt
 ```
 
-#####Run training script
+##### Run training script
 ```
 python run.py
 ```
@@ -18,7 +18,7 @@ controlling training, and it's also where you specifiy what
 data you'll work on. Please run `python run.py -h` for 
 an overview of options. 
 
-#####Evaluating 
+##### Evaluating 
 If you just want to evaluate a trained model and produce 
 predictions, you do:
  ```
