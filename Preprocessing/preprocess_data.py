@@ -13,10 +13,6 @@ from dataset import Dataset, Ontology
 root_dir = os.path.dirname(__file__)
 data_dir = root_dir #os.path.join(root_dir, 'MULTIWOZ')
 
-
-#furl = 'https://mi.eng.cam.ac.uk/~nm480/woz_2.0.zip'
-#fzip = os.path.join(data_dir, 'woz.zip')
-
 draw = "raw"
 dann = "ann"
 
