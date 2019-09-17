@@ -1,6 +1,6 @@
 # Domain Transfer in Dialogue Systems without Turn-Level Supervision
  
-This is the code repository for our paper [Domain Transfer in Dialogue Systems without Turn-Level Supervision](url).
+This is the code repository for our paper [Domain Transfer in Dialogue Systems without Turn-Level Supervision](http://arxiv.org/abs/1909.07101).
 
 ## Run it
 
@@ -33,7 +33,7 @@ If you use this code, please cite the paper. Bibtex:
 @article{bingel2019domain,
   title={Domain Transfer in Dialogue Systems without Turn-Level Supervision},
   author={Bingel, Joachim and Petr\'en Bach Hansen, Victor and Gonzalez, Ana Valeria and Budzianowski, Pawe{\l}  and Augenstein, Isabelle and S{\o}gaard, Anders},
-  journal={arXiv preprint arXiv:1909.[to-come]},
+  journal={arXiv preprint arXiv:1909.07101},
   year={2019}
 }
 
