@@ -99,7 +99,7 @@ torchsummary==1.5.1
 tqdm==4.19.1.post1
 ujson==1.35
 Unidecode==1.0.23
-urllib3==1.22
+urllib3==1.26.5
 vocab==0.0.3
 wcwidth==0.1.7
 websocket-client==0.54.0
